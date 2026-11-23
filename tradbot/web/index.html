@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TradBot</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%2322c55e'/%3E%3Cpath d='M6 22l6-7 5 4 9-11' stroke='%23fff' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app">
+  <aside class="nav">
+    <div class="brand"><span class="logo"></span><div><b>TradBot</b><small>AI paper trading</small></div></div>
+    <nav id="tabs">
+      <button data-tab="overview" class="active">Overview</button>
+      <button data-tab="chart">Chart</button>
+      <button data-tab="strategies">Strategies</button>
+      <button data-tab="trades">Trades</button>
+      <button data-tab="ai">AI Brain</button>
+      <button data-tab="backtest">Backtest</button>
+      <button data-tab="settings">Settings</button>
+      <button data-tab="log">Log</button>
+    </nav>
+    <div class="nav-foot">
+      <div class="pill" id="mode-pill">PAPER MODE · fake money</div>
+      <div class="muted small" id="conn">connecting…</div>
+    </div>
+  </aside>
+
+  <main>
+    <div id="banner" class="banner hidden"></div>
+    <div id="job" class="job hidden"><div class="job-text"><b id="job-name"></b> <span id="job-msg"></span></div><div class="bar"><i id="job-bar"></i></div></div>
+
+    <!-- OVERVIEW -->
+    <section id="tab-overview" class="tab active">
+      <header class="head">
+        <h1>Overview</h1>
+        <div class="actions">
+          <button class="btn" id="btn-pause">Pause bot</button>
+        </div>
+      </header>
+      <div class="kpis">
+        <div class="kpi"><span>Balance (fake USDT)</span><b id="k-equity">–</b><small id="k-start"></small></div>
+        <div class="kpi"><span>Total profit / loss</span><b id="k-total">–</b><small id="k-total-usd"></small></div>
+        <div class="kpi"><span>Today</span><b id="k-today">–</b><small>daily stop at −<span id="k-daylimit"></span>%</small></div>
+        <div class="kpi"><span>Drop from peak</span><b id="k-dd">–</b><small>kill switch at −<span id="k-kill"></span>%</small></div>
+      </div>
+      <div class="grid2">
+        <div class="card">
+          <div class="card-head"><h2>Balance over time</h2><span class="muted small">paper account</span></div>
+          <div id="equity-chart" class="chart"></div>
+          <div id="equity-empty" class="empty hidden">No history yet — the balance is recorded every hour.</div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>Bot status</h2></div>
+          <dl class="status" id="status-list"></dl>
+          <div class="prices" id="prices"></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h2>Open trades</h2><span class="muted small" id="open-count"></span></div>
+        <div class="table-wrap"><table><thead><tr><th>Coin</th><th>Strategy</th><th>Size</th><th>Entry</th><th>Now</th><th>Stop / Target</th><th>P/L</th></tr></thead><tbody id="open-body"></tbody></table></div>
+        <div id="open-empty" class="empty">No open trades. The bot is waiting for a good setup.</div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h2>Latest events</h2></div>
+        <ul class="feed" id="feed"></ul>
+      </div>
+    </section>
+
+    <!-- CHART -->
+    <section id="tab-chart" class="tab">
+      <header class="head"><h1>Price chart</h1><div class="actions" id="sym-buttons"></div></header>
+      <div class="card"><div id="price-chart" class="chart tall"></div>
+        <p class="muted small legend"><span class="dot up"></span>buy <span class="dot down"></span>sell · dashed lines = stop-loss / target of open trades · 1 candle = 1 hour</p></div>
+    </section>
+
+    <!-- STRATEGIES -->
+    <section id="tab-strategies" class="tab">
+      <header class="head"><h1>Strategies</h1><div class="actions"><button class="btn primary" id="btn-lab">Run Strategy Lab now</button></div></header>
+      <div class="card" id="lab-summary"></div>
+      <div id="strategy-list"></div>
+      <div class="card explain">
+        <h2>How to read this</h2>
+        <ul>
+          <li><b>Research</b> = the history the strategy was found on (it always looks good here).</li>
+          <li><b>Validation</b> = newer history it never saw. It had to pass here to be chosen.</li>
+          <li><b>Final test</b> = the newest history, never used for choosing. <b>This is the honest number.</b></li>
+          <li><b>Sharpe</b> = profit compared to how bumpy the ride was (above 1 is good). <b>Drawdown</b> = biggest fall.</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- TRADES -->
+    <section id="tab-trades" class="tab">
+      <header class="head"><h1>Trade history</h1><span class="muted" id="trade-stats"></span></header>
+      <div class="card"><div class="table-wrap"><table><thead><tr><th>Closed</th><th>Coin</th><th>Strategy</th><th>Entry</th><th>Exit</th><th>Why sold</th><th>P/L</th></tr></thead><tbody id="trades-body"></tbody></table></div>
+        <div id="trades-empty" class="empty">No finished trades yet.</div></div>
+    </section>
+
+    <!-- AI -->
+    <section id="tab-ai" class="tab">
+      <header class="head"><h1>AI Brain</h1><span class="pill" id="ai-pill"></span></header>
+      <div class="card explain">
+        <p>The AI brain suggests strategy ideas, reviews each buy (it may <b>block</b> a trade, never force one) and writes a daily report. Its ideas still must pass the Strategy Lab tests, and it can never skip the risk rules.</p>
+      </div>
+      <div class="card"><div class="card-head"><h2>AI messages</h2></div><ul class="feed" id="ai-feed"></ul>
+        <div id="ai-empty" class="empty">No AI messages yet. Add a free Gemini key in Settings to turn the AI brain on.</div></div>
+    </section>
+
+    <!-- BACKTEST -->
+    <section id="tab-backtest" class="tab">
+      <header class="head"><h1>Backtest</h1><div class="actions"><button class="btn primary" id="btn-backtest">Run backtest</button></div></header>
+      <div class="card"><div class="card-head"><h2>Active strategies vs buy &amp; hold (all history)</h2></div>
+        <div id="bt-chart" class="chart tall"></div>
+        <div id="bt-empty" class="empty hidden">No backtest yet. Click “Run backtest”.</div>
+        <p class="muted small">Starting value = 1.0 (e.g. 1.10 = +10%). Fees and slippage included. Each strategy risks at most <span class="bt-pos"></span>% per trade, so its line moves less than buy &amp; hold.</p>
+      </div>
+      <div class="card"><div class="table-wrap"><table><thead><tr><th>Strategy</th><th>Coin</th><th>Trades</th><th>Win rate</th><th>Return</th><th>Max drop</th><th>Sharpe</th><th>Buy &amp; hold</th></tr></thead><tbody id="bt-body"></tbody></table></div></div>
+    </section>
+
+    <!-- SETTINGS -->
+    <section id="tab-settings" class="tab">
+      <header class="head"><h1>Settings</h1></header>
+      <div class="card">
+        <h2>AI brain</h2>
+        <form id="ai-form" class="form" autocomplete="off">
+          <label>Provider
+            <select name="provider"><option value="gemini">Gemini (free tier)</option><option value="claude">Claude (paid)</option><option value="none">None (rules + ML only)</option></select>
+          </label>
+          <label>Gemini API key <input name="gemini_key" type="password" placeholder="paste key from aistudio.google.com"></label>
+          <label>Claude API key <input name="claude_key" type="password" placeholder="optional, from console.anthropic.com"></label>
+          <div class="row"><button class="btn primary" type="submit">Save</button><button class="btn" type="button" id="btn-test-ai">Test AI</button><span id="ai-result" class="muted small"></span></div>
+          <p class="muted small">Keys are saved only on this PC in the <code>.env</code> file. Never share them.</p>
+        </form>
+      </div>
+      <div class="card">
+        <h2>Risk rules <span class="muted small">(change in config.yaml, then restart)</span></h2>
+        <dl class="status" id="risk-list"></dl>
+      </div>
+      <div class="card danger">
+        <h2>Controls</h2>
+        <div class="row wrap">
+          <button class="btn" id="btn-reset-kill">Reset kill switch</button>
+          <button class="btn danger" id="btn-reset-account">Reset paper account</button>
+        </div>
+        <p class="muted small">Resetting the paper account deletes fake balance and trade history and starts again from the starting balance.</p>
+      </div>
+    </section>
+
+    <!-- LOG -->
+    <section id="tab-log" class="tab">
+      <header class="head"><h1>Log</h1><span class="muted small">also saved in data/bot.log</span></header>
+      <div class="card"><pre id="log" class="log"></pre></div>
+    </section>
+  </main>
+</div>
+<div id="toast" class="toast hidden"></div>
+<script src="vendor/lightweight-charts.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

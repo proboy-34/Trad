@@ -1,0 +1,10 @@
+# secrets - NEVER upload
+.env
+# bot data (downloaded prices, database, models, logs)
+data/
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/

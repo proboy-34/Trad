@@ -1,0 +1,91 @@
+# =====================================================================
+#  TradBot settings
+#  Lines starting with # are comments (notes). Change values after ":"
+#  Restart the bot after changing this file.
+# =====================================================================
+
+# Coins to trade (Binance spot pairs)
+symbols:
+  - BTC/USDT
+  - ETH/USDT
+
+# Candle size. 1h = one candle per hour (recommended)
+timeframe: 1h
+
+# How many days of price history to download for research
+history_days: 1095          # about 3 years
+
+# ---------------------------------------------------------------------
+#  MODE - only "paper" exists in this version (fake money).
+#  Real-money trading is intentionally NOT built yet.
+# ---------------------------------------------------------------------
+mode: paper
+
+paper:
+  starting_balance: 10000   # fake USDT
+  fee_pct: 0.1              # Binance spot fee per side (%)
+  slippage_pct: 0.05        # pessimistic extra cost per fill (%)
+
+# ---------------------------------------------------------------------
+#  RISK RULES - the "boss". These ALWAYS apply, to every strategy,
+#  including ideas from the AI brain.
+# ---------------------------------------------------------------------
+risk:
+  max_position_pct: 25      # max % of balance in one trade
+  max_open_positions: 3     # max trades open at the same time
+  daily_loss_limit_pct: 5   # stop trading for the day after -5%
+  kill_switch_drawdown_pct: 20   # stop ALL trading after -20% from peak
+  min_trade_usdt: 10        # don't open trades smaller than this
+
+# ---------------------------------------------------------------------
+#  STRATEGY LAB - the bot's research team
+# ---------------------------------------------------------------------
+lab:
+  population: 300           # random strategy ideas per generation
+  generations: 4            # rounds of "improve the best ideas"
+  keep_top: 3               # how many strategies go to paper trading
+  min_trades: 30            # ignore strategies with fewer trades (luck)
+  max_drawdown_pct: 20      # ignore strategies that fell more than this
+  # Split of history: research | validation (unseen) | final test (unseen)
+  split: [0.6, 0.2, 0.2]
+  auto_run_weekday: 6       # 0=Monday ... 6=Sunday (weekly re-research)
+  auto_run_hour_utc: 2
+  batch_size: 50            # smaller = less memory, slower (low-end PC)
+
+# ---------------------------------------------------------------------
+#  MACHINE LEARNING model (LightGBM)
+# ---------------------------------------------------------------------
+ml:
+  enabled: true
+  horizon_bars: 12          # predict price 12 candles (hours) ahead
+  target_pct: 0.6           # "up" means at least +0.6% (covers fees)
+  threads: 2                # CPU threads (keep low on a weak PC)
+
+# ---------------------------------------------------------------------
+#  AI BRAIN - an LLM that suggests ideas, reviews trades, writes reports
+#  provider: gemini | claude | none
+#  Put your API key in the dashboard Settings page (saved in .env file)
+# ---------------------------------------------------------------------
+brain:
+  provider: gemini
+  gemini_model: gemini-2.5-flash
+  claude_model: claude-haiku-5-5
+  review_trades: true       # AI may BLOCK a trade (never force one)
+  suggest_strategies: true  # AI suggests ideas for the Strategy Lab
+  daily_report: true
+  use_news: true            # Gemini: search the web for crypto news
+  max_calls_per_hour: 20    # stay well inside free-tier limits
+
+# ---------------------------------------------------------------------
+#  Live strategy monitoring - retire strategies that fail in paper
+# ---------------------------------------------------------------------
+monitor:
+  retire_after_trades: 10       # judge only after this many trades
+  retire_if_profit_factor_below: 0.8
+
+# ---------------------------------------------------------------------
+#  Dashboard (opens in your web browser)
+# ---------------------------------------------------------------------
+dashboard:
+  host: 127.0.0.1           # only your own PC can open it
+  port: 8050
