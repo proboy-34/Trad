@@ -152,6 +152,9 @@ async function loadMessages() {
   const ai = d.messages.filter((m) => m.kind.startsWith("ai"));
   $("ai-feed").innerHTML = ai.map(feedItem).join("");
   $("ai-empty").classList.toggle("hidden", ai.length > 0);
+  $("ai-empty").textContent = state.last?.brain?.ready
+    ? "The AI brain is ON. Its messages appear here when it reviews a buy, suggests strategy ideas (when the Strategy Lab runs) or writes the daily report (00:05 UTC)."
+    : "No AI messages yet. Add a free Gemini key in Settings to turn the AI brain on.";
 }
 
 /* ----------------------------------------------------------- chart */
