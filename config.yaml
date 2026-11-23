@@ -68,8 +68,8 @@ ml:
 # ---------------------------------------------------------------------
 brain:
   provider: gemini
-  gemini_model: gemini-2.5-flash
-  claude_model: claude-haiku-5-5
+  gemini_model: gemini-flash-latest
+  claude_model: claude-opus-5-5
   review_trades: true       # AI may BLOCK a trade (never force one)
   suggest_strategies: true  # AI suggests ideas for the Strategy Lab
   daily_report: true

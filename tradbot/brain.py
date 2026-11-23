@@ -19,6 +19,7 @@ import time
 
 import requests
 
+from .config import save_env_value
 from .features import FEATURES
 from .log import get_logger
 from .strategy import Strategy, validate_strategy_dict
@@ -61,7 +62,11 @@ class Brain:
         self.calls = collections.deque()
         self.news_ok = bool(self.cfg.get("use_news", True))
         self.last_error = ""
-        self._gemini_model = self.cfg.get("gemini_model", "gemini-2.5-flash")
+        # a model that worked before (saved in .env) wins over config.yaml
+        self._gemini_model = (os.environ.get("GEMINI_MODEL")
+                              or self.cfg.get("gemini_model", "gemini-flash-latest"))
+        self._gemini_confirmed = False
+        self._candidates: list[str] | None = None
         self._claude = None
 
     # ----------------------------------------------------------- status
@@ -109,53 +114,91 @@ class Brain:
             return None
 
     def _ask_gemini(self, prompt: str, news: bool) -> str:
-        body = {
-            "systemInstruction": {"parts": [{"text": SYSTEM}]},
-            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-            "generationConfig": {"temperature": 0.4},
-        }
-        if news:
-            body["tools"] = [{"google_search": {}}]
         headers = {"x-goog-api-key": self.key(), "Content-Type": "application/json"}
-        url = f"{GEMINI_URL}/models/{self._gemini_model}:generateContent"
-        r = requests.post(url, json=body, headers=headers, timeout=60)
-        if r.status_code == 404:
-            # model name retired? pick the newest available "flash" model
-            new = self._find_gemini_model(headers)
-            if new and new != self._gemini_model:
-                log.info("Gemini model %s not found, switching to %s", self._gemini_model, new)
-                self._gemini_model = new
-                return self._ask_gemini(prompt, news)
-        if r.status_code in (400, 401, 403) and ("API key not valid" in r.text
-                                                 or "API_KEY_INVALID" in r.text):
-            raise RuntimeError("Gemini says the API key is not valid - copy it again "
-                               "from aistudio.google.com and save it in Settings")
-        if r.status_code == 400 and "location is not supported" in r.text.lower():
-            raise RuntimeError("Gemini's free API is not available in your country/region")
-        if r.status_code == 400 and news:
-            # web search not allowed for this key/model - continue without it
-            self.news_ok = False
-            log.info("Gemini web search not available, continuing without news")
-            return self._ask_gemini(prompt, False)
-        if r.status_code == 429:
-            raise RuntimeError("Gemini free-tier limit reached, will retry later")
-        if r.status_code in (401, 403):
-            raise RuntimeError("Gemini rejected the API key - check it in Settings")
-        r.raise_for_status()
-        data = r.json()
-        parts = (data.get("candidates") or [{}])[0].get("content", {}).get("parts", [])
-        return "".join(p.get("text", "") for p in parts).strip()
+        tried: list[str] = []
+        while True:
+            model = self._gemini_model
+            if model not in tried:
+                tried.append(model)
+            body = {
+                "systemInstruction": {"parts": [{"text": SYSTEM}]},
+                "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+                "generationConfig": {"temperature": 0.4},
+            }
+            if news:
+                body["tools"] = [{"google_search": {}}]
+            r = requests.post(f"{GEMINI_URL}/models/{model}:generateContent",
+                              json=body, headers=headers, timeout=60)
+            text = r.text
+            if r.status_code in (400, 401, 403) and ("API key not valid" in text
+                                                     or "API_KEY_INVALID" in text):
+                raise RuntimeError("Gemini says the API key is not valid - copy it again "
+                                   "from aistudio.google.com and save it in Settings")
+            if r.status_code == 400 and "location is not supported" in text.lower():
+                raise RuntimeError("Gemini's free API is not available in your country/region")
+            if r.status_code == 400 and news:
+                # web search not allowed for this key/model - continue without it
+                self.news_ok = news = False
+                log.info("Gemini web search not available, continuing without news")
+                continue
+            # this model can't be used (retired, or not part of the free tier)?
+            # -> try the next best model, up to 5 different ones
+            unusable = (r.status_code == 404
+                        or (r.status_code == 429 and (not self._gemini_confirmed
+                                                      or "limit: 0" in text)))
+            if unusable:
+                nxt = next((m for m in self._gemini_candidates(headers) if m not in tried), None)
+                if nxt and len(tried) < 5:
+                    log.info("Gemini model %s not usable (HTTP %s), trying %s",
+                             model, r.status_code, nxt)
+                    self._gemini_model = nxt
+                    continue
+                if r.status_code == 404:
+                    raise RuntimeError("No Gemini model found for this key")
+            if r.status_code == 429:
+                raise RuntimeError("Gemini free-tier limit reached, will retry later")
+            if r.status_code in (401, 403):
+                raise RuntimeError("Gemini rejected the API key - check it in Settings")
+            r.raise_for_status()
+            if not self._gemini_confirmed:
+                self._gemini_confirmed = True
+                if model != os.environ.get("GEMINI_MODEL"):
+                    save_env_value("GEMINI_MODEL", model)   # remember the model that works
+                    log.info("Gemini model %s works - saved for next time", model)
+            data = r.json()
+            parts = (data.get("candidates") or [{}])[0].get("content", {}).get("parts", [])
+            return "".join(p.get("text", "") for p in parts).strip()
 
-    def _find_gemini_model(self, headers) -> str | None:
+    # words that mark special-purpose models (images, audio, ...) - not for us
+    _SKIP = ("image", "tts", "audio", "live", "embed", "omni", "vision", "native", "robot",
+             "computer", "exp", "preview", "learnlm", "aqa", "gemma", "nano")
+
+    def _gemini_candidates(self, headers) -> list[str]:
+        """Text models for this key, best free-tier choices first:
+        flash  ->  flash-lite  ->  others (pro is last: smallest free limits)."""
+        if self._candidates is not None:
+            return self._candidates
+        names = []
         try:
-            r = requests.get(f"{GEMINI_URL}/models", headers=headers, timeout=20)
-            names = [m["name"].split("/")[-1] for m in r.json().get("models", [])
-                     if "generateContent" in m.get("supportedGenerationMethods", [])]
-            flash = [n for n in names if "flash" in n and "lite" not in n and "preview" not in n
-                     and "exp" not in n]
-            return sorted(flash)[-1] if flash else (names[0] if names else None)
+            r = requests.get(f"{GEMINI_URL}/models", headers=headers,
+                             params={"pageSize": 1000}, timeout=20)
+            for m in r.json().get("models", []):
+                n = m.get("name", "").split("/")[-1]
+                if (n.startswith("gemini-")
+                        and "generateContent" in m.get("supportedGenerationMethods", [])
+                        and not any(w in n for w in self._SKIP)):
+                    names.append(n)
         except Exception:
-            return None
+            pass
+
+        def rank(n: str):
+            tier = 0 if ("flash" in n and "lite" not in n) else 1 if "flash" in n else 2
+            nums = re.findall(r"\d+(?:\.\d+)?", n)
+            version = 999.0 if "latest" in n else (float(nums[0]) if nums else 0.0)
+            return (tier, -version, len(n))
+
+        self._candidates = sorted(set(names), key=rank)
+        return self._candidates
 
     def _ask_claude(self, prompt: str, max_tokens: int) -> str | None:
         import anthropic   # optional dependency, only needed for provider: claude

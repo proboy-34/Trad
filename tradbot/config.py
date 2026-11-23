@@ -40,8 +40,8 @@ DEFAULTS: dict = {
     "ml": {"enabled": True, "horizon_bars": 12, "target_pct": 0.6, "threads": 2},
     "brain": {
         "provider": "gemini",
-        "gemini_model": "gemini-2.5-flash",
-        "claude_model": "claude-haiku-5-5",
+        "gemini_model": "gemini-flash-latest",
+        "claude_model": "claude-opus-5-5",
         "review_trades": True,
         "suggest_strategies": True,
         "daily_report": True,
