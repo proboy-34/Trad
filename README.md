@@ -24,38 +24,29 @@ It has a dashboard that opens in your browser.
 
 ---
 
-## Install on Windows (about 15 minutes, one time only)
+## Install and run on Windows: ONE file does everything
 
-### 1. Install Python
-1. Open <https://www.python.org/downloads/> and download **Python 3.12** (3.11 or 3.13 also work).
-2. Run the installer. **Tick the box "Add python.exe to PATH"** at the bottom of the first screen. This step is important.
-3. Click **Install Now**.
+1. **Download TradBot:** while logged in to GitHub, open
+   <https://github.com/proboy-34/Trad/archive/refs/heads/claude/gifted-ptolemy-4nosha.zip>
+   and the ZIP downloads. Right-click it → **Extract All**. You can move the folder anywhere, e.g. `C:\TradBot`.
+2. **Double-click `TradBot.bat`.** That's all. It automatically:
+   - installs **Python** if your PC doesn't have it (no admin needed)
+   - installs the libraries (first time only, 3–10 minutes)
+   - asks once if TradBot should **start by itself when Windows starts** (press **Y** or **N**)
+   - starts the bot and opens the dashboard at <http://127.0.0.1:8050>
+   - **restarts the bot by itself** if it ever crashes
+3. **First start:** the bot downloads 3 years of prices and runs the Strategy Lab
+   (1–3 minutes, watch the progress bar). After that it decides and trades by itself every hour.
 
-### 2. Download TradBot
-- On the GitHub page of this repository, click the green **Code** button, then **Download ZIP**.
-- Right-click the ZIP → **Extract All** → choose a simple folder, e.g. `C:\TradBot`.
+**Keep the black window open** (you can minimize it). Closing it stops the bot.
+Double-clicking `TradBot.bat` again while the bot runs just opens the dashboard.
 
-  (If you use git: `git clone` the repository instead.)
+> If Windows shows "Windows protected your PC", click **More info → Run anyway**.
+> This happens because the file is new. You can open `TradBot.bat` in Notepad to read exactly what it does.
+>
+> **Turn off auto-start:** press `Win + R`, type `shell:startup`, and delete `TradBot-autostart.bat`.
 
-### 3. Install the bot
-Open the folder and **double-click `install.bat`**.
-It creates a private Python environment (`.venv`), installs the libraries, and runs a check.
-At the end you should see `All good!`.
-
-> If Windows shows "Windows protected your PC", click **More info → Run anyway**
-> (it's because the file is new, not because it's dangerous — you can open
-> `install.bat` in Notepad to read exactly what it does).
-
-### 4. Start the bot
-**Double-click `start.bat`.**
-- A black window opens. **Keep it open**, because that's the bot running. Close it to stop the bot.
-- Your browser opens the dashboard at <http://127.0.0.1:8050>.
-- **First start:** the bot downloads 3 years of prices and runs the Strategy Lab.
-  This takes about 1–3 minutes on a normal PC (watch the progress bar).
-
-That's it. From now on the bot decides and trades by itself every hour.
-
-### 5. (Optional) Turn on the free AI brain (Gemini)
+### Optional: turn on the free AI brain (Gemini)
 1. Open <https://aistudio.google.com/apikey> and sign in with a Google account.
 2. Click **Create API key** and copy it.
 3. In the dashboard, go to **Settings**, paste the key in "Gemini API key", click **Save**, then **Test AI**.
@@ -67,13 +58,13 @@ The bot limits itself to 20 AI calls per hour to stay inside the free tier.
 
 ## Daily use
 
-- Run `start.bat` and leave it running. The bot works 24/7 while the window is open.
+- Run `TradBot.bat` and leave it running (or let it auto-start with Windows). The bot works 24/7 while the window is open.
 - Check the dashboard once a day (5 minutes):
   - **Overview:** balance, today's result, open trades, latest events.
   - **Strategies:** what each strategy does, in plain English, with honest test results.
   - **Trades:** every finished trade and why it was sold.
   - **AI Brain:** the AI's reviews and daily reports.
-- If the PC turns off, just run `start.bat` again. Open trades are remembered, and
+- If the PC turns off, just run `TradBot.bat` again (or it starts by itself if you chose auto-start). Open trades are remembered, and
   stop-losses that were hit while it was off are applied.
 
 ### Commands (optional, for the terminal)
@@ -164,10 +155,10 @@ Restart the bot after changing it. The most useful ones:
 
 | Problem | Fix |
 |---|---|
-| `'python' is not recognized` | Python isn't on PATH. Reinstall Python and tick **"Add python.exe to PATH"**. |
-| `install.bat` fails while installing | Check your internet and run it again. Python 3.11–3.13 is required. |
+| "Could not install Python automatically" | Install Python 3.12 from python.org and tick **"Add python.exe to PATH"**, then open `TradBot.bat` again. |
+| "Installing libraries failed" | Check your internet and open `TradBot.bat` again. Python 3.10–3.14 is supported. |
 | "Could not reach Binance" | Check your internet. The bot automatically tries Binance's backup data server. It retries every minute. |
-| Dashboard doesn't open | Open <http://127.0.0.1:8050> yourself. Make sure the black window is still open. |
+| Dashboard doesn't open | Open <http://127.0.0.1:8050> yourself. Make sure the black TradBot window is still open. |
 | "Port 8050 in use" | Another copy is running. Close it, or change `dashboard.port` in `config.yaml`. |
 | "No strategy passed the tests" | Normal in some markets. The bot doesn't trade, which is the safe choice. The Lab retries weekly, or click **Run Strategy Lab now**. |
 | Gemini "API key is not valid" | Copy the key again from aistudio.google.com, paste it in Settings, and click Save. |
@@ -192,8 +183,7 @@ better. See **[docs/SERVER_SETUP.md](docs/SERVER_SETUP.md)** (Oracle Cloud free 
 ```
 main.py              start here (commands)
 config.yaml          all settings
-install.bat          Windows installer (double-click)
-start.bat            Windows start (double-click)
+TradBot.bat          Windows one-click: installs everything + runs the bot
 tradbot/
   data.py            Binance price download (with backup server)
   features.py        indicators (RSI, MACD, ATR, moving averages ...)

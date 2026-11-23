@@ -31,7 +31,7 @@ def cmd_check(cfg):
             print(f"library {mod} ... OK")
         except Exception as e:
             ok = False
-            print(f"library {mod} ... MISSING ({e}). Run install.bat again.")
+            print(f"library {mod} ... MISSING ({e}). Delete the .venv folder and open TradBot.bat again.")
     from tradbot import data
     try:
         for s in cfg["symbols"]:
