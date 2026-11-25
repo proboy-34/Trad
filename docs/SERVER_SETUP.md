@@ -1,5 +1,32 @@
 # Running TradBot 24/7 on a server
 
+## Option A: a bot-hosting panel (e.g. Botkeep)
+
+Measured TradBot needs: **~170 MB RAM**, about half of one CPU core while researching,
+and ~150 MB disk. That fits free bot plans with **512 MB RAM / 1 GB storage**.
+
+1. Create a **Python** server (Python 3.11-3.13).
+2. Get the code in: **Upload a ZIP** of the project from GitHub (Code -> Download ZIP),
+   or **Import from GitHub** (the repository is private, so the panel must be connected to
+   your GitHub account). Don't upload your PC's `.env` file or `data` folder.
+3. Install command (if the panel asks): `pip install -r requirements.txt`
+4. Startup command: `python main.py run --server`
+5. Environment variable: `DASHBOARD_PASSWORD` = a long password you choose.
+   Without it the dashboard refuses to be reachable from the internet (safety).
+   The port is taken automatically from the panel's `PORT` / `SERVER_PORT` variable.
+6. Start the server, open the address the panel gives you, enter the password
+   (any user name), then add your Gemini key in **Settings**.
+
+Notes:
+- The `data` folder holds the paper account, strategies and models. Check that the panel
+  keeps files between restarts, otherwise the bot starts from zero after each restart.
+- If the panel's CPU limit makes things slow, raise `research.pause_seconds` (e.g. 60) in `config.yaml`.
+- If the panel's server is in the USA, Binance's main API is blocked there; TradBot then uses
+  Binance's public data mirror automatically, which is fine for paper trading.
+- Your Gemini key will be stored on that service. Only use a host you trust.
+
+## Option B: your own VPS
+
 Use this when you are ready for the serious 4–8 week paper test. Your PC no
 longer needs to stay on.
 

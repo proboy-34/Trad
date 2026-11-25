@@ -124,6 +124,8 @@ def main():
     p.add_argument("command", nargs="?", default="run",
                    choices=["run", "check", "lab", "backtest", "report"])
     p.add_argument("--no-browser", action="store_true", help="don't open the browser automatically")
+    p.add_argument("--server", action="store_true",
+                   help="hosting mode: dashboard reachable from the internet (needs DASHBOARD_PASSWORD)")
     args = p.parse_args()
 
     from tradbot.config import load_config
@@ -131,6 +133,10 @@ def main():
     get_logger()
     cfg = load_config()
     t0 = time.time()
+    if args.server:
+        import os
+        os.environ.setdefault("TRADBOT_HOST", "0.0.0.0")
+        args.no_browser = True
     if args.command == "run":
         cmd_run(cfg, open_browser=not args.no_browser)
     else:

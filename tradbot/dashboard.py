@@ -5,8 +5,11 @@ Only your own PC can open it (host 127.0.0.1).
 """
 from __future__ import annotations
 
+import base64
+import hmac
 import json
 import mimetypes
+import os
 import threading
 import time
 import webbrowser
@@ -157,6 +160,14 @@ class API:
         return {"ok": False, "msg": "unknown action"}
 
 
+def password() -> str:
+    return os.environ.get("DASHBOARD_PASSWORD", "")
+
+
+def is_local(host: str) -> bool:
+    return host in ("127.0.0.1", "localhost", "::1")
+
+
 def make_handler(api: API):
     routes = {"state": api.state, "equity": api.equity, "trades": api.trades,
               "messages": api.messages, "log": api.logs, "strategies": api.strategies,
@@ -180,7 +191,31 @@ def make_handler(api: API):
         def _json(self, obj, code=200):
             self._send(code, json.dumps(obj, default=str).encode(), "application/json")
 
+        def _authorized(self) -> bool:
+            """With DASHBOARD_PASSWORD set, the browser asks for it (any user name)."""
+            pw = password()
+            if not pw:
+                return True
+            header = self.headers.get("Authorization", "")
+            if header.startswith("Basic "):
+                try:
+                    given = base64.b64decode(header[6:]).decode("utf-8").split(":", 1)[-1]
+                except Exception:
+                    given = ""
+                if hmac.compare_digest(given.encode(), pw.encode()):
+                    return True
+            body = b"Password required"
+            self.send_response(401)
+            self.send_header("WWW-Authenticate", 'Basic realm="TradBot", charset="UTF-8"')
+            self.send_header("Content-Type", "text/plain")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return False
+
         def do_GET(self):
+            if not self._authorized():
+                return
             u = urlparse(self.path)
             if u.path.startswith("/api/"):
                 fn = routes.get(u.path[5:])
@@ -201,6 +236,8 @@ def make_handler(api: API):
             self._send(200, f.read_bytes(), ctype, cache="vendor" in rel)
 
         def do_POST(self):
+            if not self._authorized():
+                return
             u = urlparse(self.path)
             # only our own page can send commands (blocks other websites)
             if self.headers.get("X-TradBot") != "1" or not u.path.startswith("/api/"):
@@ -220,7 +257,17 @@ def make_handler(api: API):
 
 
 def serve(engine: Engine, open_browser: bool = True):
-    cfg = engine.cfg["dashboard"]
+    cfg = dict(engine.cfg["dashboard"])
+    # hosting services usually tell the app its port in an environment variable
+    port_env = os.environ.get("PORT") or os.environ.get("SERVER_PORT")
+    if port_env:
+        cfg["port"] = int(port_env)
+    if os.environ.get("TRADBOT_HOST"):
+        cfg["host"] = os.environ["TRADBOT_HOST"]
+    if not is_local(cfg["host"]) and not password():
+        log.error("SAFETY: the dashboard would be open to the internet without a password. "
+                  "Set DASHBOARD_PASSWORD (see docs/SERVER_SETUP.md). Using 127.0.0.1 instead.")
+        cfg["host"] = "127.0.0.1"
     server = ThreadingHTTPServer((cfg["host"], int(cfg["port"])), make_handler(API(engine)))
     server.daemon_threads = True
     url = f"http://{'127.0.0.1' if cfg['host'] in ('0.0.0.0', '') else cfg['host']}:{cfg['port']}"
