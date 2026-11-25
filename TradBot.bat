@@ -7,7 +7,7 @@ rem   2. installs the libraries (only the first time / after updates)
 rem   3. starts the bot + opens the dashboard
 rem   4. restarts the bot automatically if it ever crashes
 rem ================================================================
-title TradBot - keep this window open (close it to stop the bot)
+title TradBot starter
 cd /d "%~dp0"
 set "SELF=%~f0"
 set "PYCMD="
@@ -23,11 +23,26 @@ echo.
 rem ---- already running? then just open the dashboard -----------
 curl -s -o nul -m 3 http://127.0.0.1:8050/api/state >nul 2>nul
 if errorlevel 1 goto :not_running
-echo  TradBot is already running. Opening the dashboard...
+echo  TradBot is already running.
+echo.
+echo  If you just UPDATED the bot files, it must restart to use the new version.
+choice /c YN /n /t 15 /d N /m " Restart the bot now? Press Y or N (No in 15 s): "
+if errorlevel 2 goto :just_open
+echo  Stopping the running bot...
+taskkill /f /t /fi "WINDOWTITLE eq TradBot - keep*" >nul 2>nul
+timeout /t 4 >nul
+curl -s -o nul -m 3 http://127.0.0.1:8050/api/state >nul 2>nul
+if errorlevel 1 goto :not_running
+echo  Could not stop it automatically. Close the black TradBot window yourself, then open this file again.
+pause
+exit /b 1
+:just_open
+echo  Opening the dashboard...
 start "" http://127.0.0.1:8050
 timeout /t 3 >nul
 exit /b 0
 :not_running
+title TradBot - keep this window open (close it to stop the bot)
 
 rem ---- step 1: Python -----------------------------------------------
 if exist ".venv\Scripts\python.exe" goto :have_venv

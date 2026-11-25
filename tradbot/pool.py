@@ -28,7 +28,7 @@ log = get_logger("pool")
 DEFAULTS = {
     "max_size": 300,          # strategies in testing at the same time
     "max_live": 10,           # strategies allowed to trade the paper account
-    "min_live": 3,            # if fewer are proven, the best NEW ones trade on probation
+    "min_live": 6,            # if fewer are proven, the best NEW ones trade on probation
     "promote_after_trades": 5,
     "promote_min_profit_factor": 1.1,
     "retire_after_trades": 6,

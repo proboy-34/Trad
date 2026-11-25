@@ -17,7 +17,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import data
+from . import __version__, data
 from .brain import Brain
 from .config import save_env_value
 from .engine import BACKTEST_FILE, Engine
@@ -64,7 +64,7 @@ class API:
             "news": e.news.status(), "filter": e.filter.report,
             "learning": {k: e.adjust.get(k) for k in ("insights", "mistakes", "coins", "strategies")},
             "risk": e.cfg["risk"], "symbols": e.cfg["symbols"], "timeframe": e.tf,
-            "server_time": time.time(),
+            "server_time": time.time(), "version": __version__,
         }
 
     def equity(self, q):

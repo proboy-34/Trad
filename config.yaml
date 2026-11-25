@@ -75,7 +75,7 @@ research:
 pool:
   max_size: 300             # strategies being tested at the same time
   max_live: 10              # strategies allowed to trade the paper account
-  min_live: 3               # if fewer are proven, best new ones trade on probation
+  min_live: 6               # if fewer are proven, best new ones trade on probation (half size)
   promote_after_trades: 5   # live-market-test trades needed before promotion
   promote_min_profit_factor: 1.1
   retire_after_trades: 6

@@ -5,6 +5,7 @@
 
 const $ = (id) => document.getElementById(id);
 const LWC = window.LightweightCharts;
+const APP_VERSION = "1.6";   // must match tradbot/__init__.py
 const state = { tab: "overview", symbol: null, charts: {}, last: null, symbols: [] };
 
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -110,8 +111,16 @@ async function loadState() {
   $("job").classList.toggle("hidden", !j.name);
   if (j.name) { $("job-name").textContent = j.name; $("job-msg").textContent = j.msg; $("job-bar").style.width = j.pct + "%"; }
   $("btn-backtest").disabled = !!j.name;
-  renderLive(s);
-  if (state.tab === "live") renderLivePage(s);
+  if (s.version !== APP_VERSION) {
+    // the page was updated but the running bot is still the old version
+    banner.textContent = "Update not finished: the bot that is running is an OLD version. Close the black TradBot window completely (or restart your PC), then open TradBot.bat again.";
+    banner.className = "banner";
+    return s;
+  }
+  try {
+    renderLive(s);
+    if (state.tab === "live") renderLivePage(s);
+  } catch (err) { console.warn(err); }
 
   if (!state.symbols.length) {
     state.symbols = s.symbols; state.symbol = s.symbols[0];

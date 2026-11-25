@@ -48,7 +48,7 @@ DEFAULTS: dict = {
     "pool": {
         "max_size": 300,
         "max_live": 10,
-        "min_live": 3,
+        "min_live": 6,
         "promote_after_trades": 5,
         "promote_min_profit_factor": 1.1,
         "retire_after_trades": 6,
