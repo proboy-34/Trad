@@ -1,7 +1,8 @@
 # =====================================================================
-#  TradBot settings
+#  TradBot settings (version 2)
 #  Lines starting with # are comments (notes). Change values after ":"
-#  Restart the bot after changing this file.
+#  Restart the bot after changing this file (Settings -> Restart bot).
+#  A typo here never crashes the bot: it uses safe defaults and tells you.
 # =====================================================================
 
 # Coins to trade (Binance spot pairs)
@@ -23,6 +24,9 @@ scan_seconds: 30
 # How many days of price history to download for research
 history_days: 1095          # about 3 years
 
+# Eco mode: the bot runs at low CPU priority, so your PC stays fast while you use it
+eco_mode: true
+
 # ---------------------------------------------------------------------
 #  MODE - only "paper" exists in this version (fake money).
 #  Real-money trading is intentionally NOT built yet.
@@ -41,6 +45,7 @@ paper:
 risk:
   max_position_pct: 25      # max % of balance in one trade
   max_open_positions: 3     # max trades open at the same time
+  max_new_per_candle: 2     # max NEW trades per hour (coins move together = same bet)
   daily_loss_limit_pct: 5   # stop trading for the day after -5%
   kill_switch_drawdown_pct: 20   # stop ALL trading after -20% from peak
   min_trade_usdt: 10        # don't open trades smaller than this
@@ -81,13 +86,14 @@ pool:
   retire_after_trades: 6
   retire_if_profit_factor_below: 0.9
   retire_if_return_below_pct: -3.0
+  max_per_family: 12        # max strategies using the same indicators (keeps research broad)
 
 # ---------------------------------------------------------------------
-#  NEWS - reads crypto news every 15 min; very bad news blocks NEW buys
+#  NEWS - reads crypto news every 30 min; very bad news blocks NEW buys
 # ---------------------------------------------------------------------
 news:
   enabled: true
-  refresh_minutes: 15
+  refresh_minutes: 30        # unchanged feeds are not downloaded again
   block_below: -0.5          # coin mood at or below this -> no new buys on that coin
   market_block_below: -0.6   # whole-market mood at or below this -> no new buys at all
 
@@ -114,6 +120,22 @@ brain:
   daily_report: true
   use_news: true            # Gemini: search the web for crypto news
   max_calls_per_hour: 20    # stay well inside free-tier limits
+
+# ---------------------------------------------------------------------
+#  PHONE ALERTS (Telegram) - connect in the dashboard: Settings -> Phone alerts
+# ---------------------------------------------------------------------
+notify:
+  trades: true              # every buy and sell, with the reason and the lesson
+  lessons: false
+  daily: true               # daily summary (+ AI coach report if the AI brain is on)
+  alerts: true              # kill switch, internet back after a long outage
+  daily_hour: 21            # local time of the daily summary (0-23)
+
+# ---------------------------------------------------------------------
+#  BACKUPS - your balance, trades and strategies, saved every day
+# ---------------------------------------------------------------------
+backup:
+  keep_days: 7              # data\backups keeps the last 7 daily backups
 
 # ---------------------------------------------------------------------
 #  Dashboard (opens in your web browser)

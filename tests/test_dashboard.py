@@ -22,7 +22,8 @@ class FakeAPI:
 @pytest.fixture
 def server(monkeypatch):
     api = FakeAPI()
-    for name in ("equity", "trades", "messages", "logs", "strategies", "backtest", "candles"):
+    for name in ("equity", "trades", "messages", "logs", "strategies", "backtest", "candles",
+                 "health", "whatsnew"):
         setattr(api, name, api.state)
     srv = ThreadingHTTPServer(("127.0.0.1", 0), dashboard.make_handler(api))
     threading.Thread(target=srv.serve_forever, daemon=True).start()

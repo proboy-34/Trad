@@ -1,10 +1,5 @@
-# Core (required)
+# Core libraries - TradBot needs all of these
 numpy>=1.26
 pandas>=2.1
 requests>=2.31
 PyYAML>=6.0
-lightgbm>=4.3
-# AI brain with Claude (optional - Gemini needs nothing extra)
-anthropic>=1.0
-# Cloud backup on Hugging Face Spaces (optional)
-huggingface_hub>=0.24

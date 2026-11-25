@@ -25,7 +25,6 @@ from .strategy import Strategy, StrategyGenerator
 log = get_logger("lab")
 
 STRATEGIES_FILE = DATA_DIR / "strategies.json"
-LAB_HISTORY_FILE = DATA_DIR / "lab_runs.json"
 
 
 def load_active() -> dict:
@@ -259,14 +258,3 @@ def _strip(m: dict) -> dict:
             if k != "per_symbol"} | {"per_symbol": {
                 s: {k: round(v, 3) if isinstance(v, float) else v for k, v in pm.items()}
                 for s, pm in m.get("per_symbol", {}).items()}}
-
-
-def _append_history(stats: dict) -> None:
-    hist = []
-    if LAB_HISTORY_FILE.exists():
-        try:
-            hist = json.loads(LAB_HISTORY_FILE.read_text(encoding="utf-8"))
-        except Exception:
-            hist = []
-    hist.append({"time": time.time(), **{k: v for k, v in stats.items() if k != "periods"}})
-    LAB_HISTORY_FILE.write_text(json.dumps(hist[-30:], indent=2), encoding="utf-8")

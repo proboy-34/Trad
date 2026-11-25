@@ -1,0 +1,4 @@
+# Optional libraries - installed one by one. If one fails (e.g. on a brand-new
+# Python version) TradBot still runs, just without that feature.
+lightgbm>=4.3        # machine-learning model + learned trade filter
+anthropic>=1.0       # only needed for the Claude AI brain (Gemini needs nothing extra)

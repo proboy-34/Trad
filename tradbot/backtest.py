@@ -95,32 +95,48 @@ def run(strategy: Strategy, feats: pd.DataFrame, start: int = 0, end: int | None
         take_px = entry_px * (1 + strategy.take_atr * atr[i])
         last = min(i + strategy.max_hold, end - 1)  # last candle we may hold
         seg = slice(e, last + 1)
-        hit_stop = l[seg] <= stop_px
+        n_seg = last + 1 - e
+        first = lambda m: int(np.argmax(m)) if m.any() else 10**9
+        # The stop can only move UP during a trade:
+        #  * trailing stop: trail_atr x ATR below the highest price so far
+        #  * break-even: once up be_atr x ATR, the stop moves to the buy price (+ fees)
+        # Pessimistic: a new high only moves the stop from the NEXT candle on.
+        stop_series = np.full(n_seg, stop_px)
+        trail_lvl = be_lvl = None
+        if strategy.trail_atr:
+            highs = np.maximum.accumulate(h[seg])
+            prev_high = np.concatenate(([entry_px], highs[:-1]))
+            trail_lvl = prev_high - strategy.trail_atr * atr[i] * entry_px
+            stop_series = np.maximum(stop_series, trail_lvl)
+        if strategy.be_atr:
+            be_px = entry_px * (1 + 2 * fee + 2 * slip)
+            jb = first(h[seg] >= entry_px * (1 + strategy.be_atr * atr[i]))
+            if jb < 10**9 and jb + 1 < n_seg:
+                be_lvl = np.full(n_seg, -np.inf)
+                be_lvl[jb + 1:] = be_px
+                stop_series = np.maximum(stop_series, be_lvl)
+        hit_stop = l[seg] <= stop_series
         hit_take = h[seg] >= take_px
         hit_exit = exit_sig[seg].copy()
         hit_exit[-1] = False                        # exit signal needs a next candle
-        first = lambda m: int(np.argmax(m)) if m.any() else 10**9
         js, jt, jx = first(hit_stop), first(hit_take), first(hit_exit)
-        # break-even stop: once the price is up be_atr x ATR, the stop moves to the
-        # buy price (+ fees). Pessimistic: it only counts from the NEXT candle.
-        jbe = 10**9
-        be_px = entry_px * (1 + 2 * fee + 2 * slip)
-        if strategy.be_atr:
-            jb = first(h[seg] >= entry_px * (1 + strategy.be_atr * atr[i]))
-            if jb < 10**9 and jb + 1 < last + 1 - e:
-                after = l[seg][jb + 1:] <= be_px
-                if after.any():
-                    jbe = jb + 1 + int(np.argmax(after))
-        k = min(js, jt, jx, jbe)
+        k = min(js, jt, jx)
         if k == 10**9:                              # time exit at close of `last`
             x = last
             exit_raw, reason = c[x], "time"
         else:
             x = e + k
             if js == k:                             # stop first (or same candle as take)
-                exit_raw, reason = min(stop_px, o[x]) if x > e else stop_px, "stop"
-            elif jbe == k:                          # break-even stop (before take if same candle)
-                exit_raw, reason = min(be_px, o[x]), "breakeven"
+                sp = stop_series[k]
+                exit_raw = min(sp, o[x]) if x > e else sp
+                t_lvl = trail_lvl[k] if trail_lvl is not None else -np.inf
+                b_lvl = be_lvl[k] if be_lvl is not None else -np.inf
+                if max(t_lvl, b_lvl) <= stop_px:
+                    reason = "stop"
+                elif b_lvl >= t_lvl:
+                    reason = "breakeven"
+                else:
+                    reason = "trail"
             elif jt == k:
                 exit_raw, reason = max(take_px, o[x]) if x > e else take_px, "take"
             else:                                   # signal exit -> next open

@@ -1,7 +1,7 @@
 """Dashboard web server (opens in your browser at http://127.0.0.1:8050).
 
 Uses Python's built-in server - nothing heavy to install, low memory.
-Only your own PC can open it (host 127.0.0.1).
+Only your own PC can open it (127.0.0.1), unless hosting mode with a password is used.
 """
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ import hmac
 import json
 import mimetypes
 import os
+import re
 import threading
 import time
 import webbrowser
@@ -17,15 +18,17 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import __version__, data
+from . import __version__, backup, data, updater
 from .brain import Brain
-from .config import save_env_value
+from .config import ROOT, save_env_value
 from .engine import BACKTEST_FILE, Engine
 from .lab import load_active
 from .log import RECENT, get_logger
 
 log = get_logger("dashboard")
 WEB = Path(__file__).resolve().parent / "web"
+RESTART_CODE = 3            # TradBot.bat restarts the bot immediately on this exit code
+MAX_UPLOAD = 50 * 1024 * 1024
 
 
 def _read_json(path: Path, default):
@@ -35,9 +38,23 @@ def _read_json(path: Path, default):
         return default
 
 
+def whats_new() -> dict:
+    """The newest section of CHANGELOG.md (shown once after an update)."""
+    try:
+        text = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    except Exception:
+        return {"version": __version__, "items": []}
+    parts = re.split(r"^## ", text, flags=re.M)
+    section = parts[1] if len(parts) > 1 else ""
+    lines = section.splitlines()
+    items = [l.lstrip("-* ").strip() for l in lines[1:] if l.strip().startswith(("-", "*"))]
+    return {"version": __version__, "title": lines[0].strip() if lines else "", "items": items}
+
+
 class API:
     def __init__(self, engine: Engine):
         self.e = engine
+        self.request_restart = None       # set by serve()
 
     # ------------------------------------------------------------- GET
     def state(self, q):
@@ -62,8 +79,9 @@ class API:
                                                     -r["met"] / max(1, r["total"])))[:10],
             "activity": list(e.activity)[-80:][::-1], "scan_seconds": e.scan_sec,
             "news": e.news.status(), "filter": e.filter.report,
-            "backup": getattr(getattr(e, "sync", None), "status", None),
             "learning": {k: e.adjust.get(k) for k in ("insights", "mistakes", "coins", "strategies")},
+            "readiness": e.readiness(), "telegram": e.notifier.status(),
+            "coin_errors": e.coin_errors, "warnings": e.cfg.get("_warnings", []),
             "risk": e.cfg["risk"], "symbols": e.cfg["symbols"], "timeframe": e.tf,
             "server_time": time.time(), "version": __version__,
         }
@@ -76,10 +94,16 @@ class API:
         return {"trades": self.e.account.trades(300)}
 
     def messages(self, q):
-        return {"messages": self.e.account.messages(80)}
+        return {"messages": self.e.account.messages(120)}
 
     def logs(self, q):
         return {"lines": list(RECENT)[-200:]}
+
+    def health(self, q):
+        return self.e.health()
+
+    def whatsnew(self, q):
+        return whats_new()
 
     def strategies(self, q):
         stats = self.e.account.strategy_stats()
@@ -158,7 +182,36 @@ class API:
                 return {"ok": False, "msg": "No AI key saved yet."}
             text = e.brain.ask("Reply with exactly: TradBot AI brain is working.")
             return {"ok": bool(text), "msg": text or e.brain.last_error}
+        if action == "telegram-connect":
+            ok, msg = e.notifier.connect(str(body.get("token") or "").strip() or None)
+            return {"ok": ok, "msg": msg, "telegram": e.notifier.status()}
+        if action == "telegram-test":
+            ok = e.notifier.send("TradBot test message - alerts are working.", "alerts")
+            return {"ok": ok, "msg": "Sent." if ok else "Phone alerts are not connected yet."}
+        if action == "telegram-off":
+            e.notifier.disconnect()
+            return {"ok": True, "telegram": e.notifier.status()}
+        if action == "restart":
+            self.request_restart and self.request_restart("restart requested in the dashboard")
+            return {"ok": True}
         return {"ok": False, "msg": "unknown action"}
+
+    def upload(self, kind: str, blob: bytes):
+        if kind == "update":
+            res = updater.apply(blob)
+            msg = (f"Update {res['from']} -> {res['to']} installed ({res['files']} files). "
+                   "TradBot restarts now.")
+            if res["config_backup"]:
+                msg += " Your old config.yaml was kept as config.yaml.bak."
+            self.e.account.message("system", msg)
+            self.request_restart and self.request_restart(msg)
+            return {"ok": True, "msg": msg, **res}
+        if kind == "restore":
+            msg = backup.stage_restore(blob)
+            self.e.account.message("system", "A backup was uploaded and will be restored now.")
+            self.request_restart and self.request_restart("restoring a backup")
+            return {"ok": True, "msg": msg + " Restarting now..."}
+        return {"ok": False, "msg": "unknown upload"}
 
 
 def password() -> str:
@@ -172,7 +225,8 @@ def is_local(host: str) -> bool:
 def make_handler(api: API):
     routes = {"state": api.state, "equity": api.equity, "trades": api.trades,
               "messages": api.messages, "log": api.logs, "strategies": api.strategies,
-              "backtest": api.backtest, "candles": api.candles}
+              "backtest": api.backtest, "candles": api.candles, "health": api.health,
+              "whatsnew": api.whatsnew}
 
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
@@ -180,12 +234,14 @@ def make_handler(api: API):
         def log_message(self, *args):   # keep the console clean
             pass
 
-        def _send(self, code: int, body: bytes, ctype: str, cache: bool = False):
+        def _send(self, code: int, body: bytes, ctype: str, cache: bool = False, extra=None):
             self.send_response(code)
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "max-age=3600" if cache else "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
+            for k, v in (extra or {}).items():
+                self.send_header(k, v)
             self.end_headers()
             self.wfile.write(body)
 
@@ -218,6 +274,11 @@ def make_handler(api: API):
             if not self._authorized():
                 return
             u = urlparse(self.path)
+            if u.path == "/api/backup/download":
+                blob = backup.build_zip()
+                name = f"tradbot-backup-{time.strftime('%Y-%m-%d')}.zip"
+                return self._send(200, blob, "application/zip",
+                                  extra={"Content-Disposition": f'attachment; filename="{name}"'})
             if u.path.startswith("/api/"):
                 fn = routes.get(u.path[5:])
                 if not fn:
@@ -243,9 +304,20 @@ def make_handler(api: API):
             # only our own page can send commands (blocks other websites)
             if self.headers.get("X-TradBot") != "1" or not u.path.startswith("/api/"):
                 return self._json({"error": "forbidden"}, 403)
-            length = min(int(self.headers.get("Content-Length") or 0), 100_000)
+            length = int(self.headers.get("Content-Length") or 0)
+            if u.path.startswith("/api/upload/"):
+                if length <= 0 or length > MAX_UPLOAD:
+                    return self._json({"ok": False, "msg": "file missing or too big"}, 400)
+                blob = self.rfile.read(length)
+                try:
+                    return self._json(api.upload(u.path[len("/api/upload/"):], blob))
+                except ValueError as ex:
+                    return self._json({"ok": False, "msg": str(ex)}, 400)
+                except Exception as ex:
+                    log.error("Upload failed: %s", ex)
+                    return self._json({"ok": False, "msg": str(ex)}, 500)
             try:
-                body = json.loads(self.rfile.read(length) or b"{}")
+                body = json.loads(self.rfile.read(min(length, 100_000)) or b"{}")
             except json.JSONDecodeError:
                 body = {}
             try:
@@ -257,7 +329,8 @@ def make_handler(api: API):
     return Handler
 
 
-def serve(engine: Engine, open_browser: bool = True):
+def serve(engine: Engine, open_browser: bool = True) -> int | None:
+    """Runs the dashboard until stopped. Returns RESTART_CODE when a restart was requested."""
     cfg = dict(engine.cfg["dashboard"])
     # hosting services usually tell the app its port in an environment variable
     port_env = os.environ.get("PORT") or os.environ.get("SERVER_PORT")
@@ -269,8 +342,16 @@ def serve(engine: Engine, open_browser: bool = True):
         log.error("SAFETY: the dashboard would be open to the internet without a password. "
                   "Set DASHBOARD_PASSWORD (see docs/SERVER_SETUP.md). Using 127.0.0.1 instead.")
         cfg["host"] = "127.0.0.1"
-    server = ThreadingHTTPServer((cfg["host"], int(cfg["port"])), make_handler(API(engine)))
+    api = API(engine)
+    server = ThreadingHTTPServer((cfg["host"], int(cfg["port"])), make_handler(api))
     server.daemon_threads = True
+
+    def request_restart(reason: str):
+        log.info("Restarting: %s", reason)
+        engine.exit_code = RESTART_CODE
+        threading.Timer(1.5, server.shutdown).start()   # let the answer reach the browser first
+    api.request_restart = request_restart
+
     url = f"http://{'127.0.0.1' if cfg['host'] in ('0.0.0.0', '') else cfg['host']}:{cfg['port']}"
     log.info("Dashboard ready: open %s in your browser", url)
     if open_browser:
@@ -281,3 +362,4 @@ def serve(engine: Engine, open_browser: bool = True):
         pass
     finally:
         server.server_close()
+    return engine.exit_code

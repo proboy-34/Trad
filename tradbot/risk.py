@@ -9,6 +9,8 @@ Rules (from config.yaml -> risk):
 """
 from __future__ import annotations
 
+import time
+
 from .paper import PaperAccount, utc_day
 
 
@@ -29,13 +31,15 @@ class RiskManager:
             changes["peak_equity"] = equity
             a["peak_equity"] = equity
         dd = (1 - equity / a["peak_equity"]) * 100 if a["peak_equity"] else 0
-        if dd >= self.r["kill_switch_drawdown_pct"] and not a["kill_switch"]:
+        fired = dd >= self.r["kill_switch_drawdown_pct"] and not a["kill_switch"]
+        if fired:
             changes["kill_switch"] = 1
+            self.acc.put("kill_fired", time.time())     # remembered for the readiness check
             self.acc.message("risk", f"KILL SWITCH ON: balance fell {dd:.1f}% from its peak. "
                                      "All new trades stopped. Review, then reset in Settings.")
         self.acc.update_account(**changes)
         day_pnl = (equity / a["day_start_equity"] - 1) * 100 if a["day_start_equity"] else 0
-        return {"drawdown_pct": dd, "day_pnl_pct": day_pnl}
+        return {"drawdown_pct": dd, "day_pnl_pct": day_pnl, "kill_switch_fired": fired}
 
     def can_open(self, equity: float, symbol: str, strategy_id: str) -> tuple[bool, str, float]:
         """Returns (allowed, reason, trade size in USDT)."""

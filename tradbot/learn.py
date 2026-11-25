@@ -20,6 +20,8 @@ LABELS = {
     "exit_rule": "closed early by the exit rule",
     "news_negative": "news mood was negative when buying",
     "protected": "break-even stop saved a loss",
+    "trail_profit": "trailing stop locked in profit",
+    "trail_loss": "trailing stop too tight",
 }
 
 
@@ -50,6 +52,15 @@ def lesson_for(t: dict) -> tuple[str, list[str]]:
         else:
             tags.append("stopped")
             text = f"Normal loss: the idea didn't work, the stop-loss limited the damage to {mae:.2f}%."
+    elif reason == "trailing stop":
+        if t["pnl"] > 0:
+            tags.append("trail_profit")
+            text = (f"Locked in profit: the trailing stop followed the price up (best +{mfe:.2f}%) "
+                    "and sold when it turned down.")
+        else:
+            tags.append("trail_loss")
+            text = (f"The trailing stop sold after a small rise (best +{mfe:.2f}%) - "
+                    "this strategy's trailing stop may be too tight.")
     elif reason == "break-even":
         tags.append("protected")
         text = (f"Protected: was up +{mfe:.2f}%, came back, and the break-even stop closed it "

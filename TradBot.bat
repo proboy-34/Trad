@@ -6,13 +6,16 @@ rem   1. installs Python (only if missing)
 rem   2. installs the libraries (only the first time / after updates)
 rem   3. starts the bot + opens the dashboard
 rem   4. restarts the bot automatically if it ever crashes
+rem   5. after a one-click update (dashboard Settings) it restarts with the new version
 rem ================================================================
 title TradBot starter
 cd /d "%~dp0"
 set "SELF=%~f0"
 set "PYCMD="
 set "FIRST=1"
+set "TRADBOT_LAUNCHER=bat"
 if /i "%~1"=="--autostart" set "FIRST=0"
+if /i "%~1"=="--restart" set "FIRST=0"
 
 echo.
 echo  ==========================================================
@@ -61,14 +64,13 @@ if errorlevel 1 goto :venv_failed
 :have_venv
 set "VPY=%~dp0.venv\Scripts\python.exe"
 
-rem ---- step 2: libraries (skipped if already installed) ------------
-fc /b requirements.txt ".venv\installed.txt" >nul 2>nul
-if not errorlevel 1 goto :libs_ok
+rem ---- step 2: libraries (first time only; later updates are handled by the bot) ----
+if exist ".venv\libs-v2.txt" goto :libs_ok
 echo  [2/3] Installing libraries (one time only, 3-10 minutes)...
 "%VPY%" -m pip install --upgrade pip --disable-pip-version-check -q
-"%VPY%" -m pip install -r requirements.txt --disable-pip-version-check
+"%VPY%" main.py install
 if errorlevel 1 goto :pip_failed
-copy /y requirements.txt ".venv\installed.txt" >nul
+echo ok> ".venv\libs-v2.txt"
 "%VPY%" main.py check
 :libs_ok
 
@@ -89,11 +91,23 @@ echo  Keep this window open (you can minimize it). Close it to stop the bot.
 echo.
 if "%FIRST%"=="1" "%VPY%" main.py run
 if not "%FIRST%"=="1" "%VPY%" main.py run --no-browser
+set "CODE=%errorlevel%"
 set "FIRST=0"
+if "%CODE%"=="3" goto :restart_now
 echo.
 echo  The bot stopped. It restarts automatically in 20 seconds.
 echo  (To stop completely, just close this window.)
 timeout /t 20
+goto :run
+
+:restart_now
+echo.
+echo  Restarting TradBot (update / restore)...
+if exist "TradBot.bat.new" (
+  move /y "TradBot.bat.new" "%SELF%" >nul
+  start "TradBot" "%SELF%" --restart
+  exit
+)
 goto :run
 
 rem ==================================================================

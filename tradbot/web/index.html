@@ -10,14 +10,13 @@
 <body>
 <div class="app">
   <aside class="nav">
-    <div class="brand"><span class="logo"></span><div><b>TradBot</b><small>AI paper trading</small></div></div>
+    <div class="brand"><span class="logo"></span><div><b>TradBot</b><small id="brand-version">AI paper trading</small></div></div>
     <nav id="tabs">
       <button data-tab="overview" class="active">Overview</button>
       <button data-tab="live" class="live-tab"><span class="pulse" id="pulse-nav"></span>Live</button>
       <button data-tab="chart">Chart</button>
       <button data-tab="strategies">Strategies</button>
-      <button data-tab="trades">Trades</button>
-      <button data-tab="ai">AI Brain</button>
+      <button data-tab="journal">Journal</button>
       <button data-tab="backtest">Backtest</button>
       <button data-tab="settings">Settings</button>
       <button data-tab="log">Log</button>
@@ -31,15 +30,18 @@
 
   <main>
     <div id="banner" class="banner hidden"></div>
+    <div id="notice" class="banner info hidden"></div>
     <div id="job" class="job hidden"><div class="job-text"><b id="job-name"></b> <span id="job-msg"></span></div><div class="bar"><i id="job-bar"></i></div></div>
+    <div id="whatsnew" class="card whatsnew hidden">
+      <div class="card-head"><h2 id="wn-title">What's new</h2><button class="btn" id="wn-ok">Got it</button></div>
+      <ul id="wn-list"></ul>
+    </div>
 
     <!-- OVERVIEW -->
     <section id="tab-overview" class="tab active">
       <header class="head">
         <h1>Overview</h1>
-        <div class="actions">
-          <button class="btn" id="btn-pause">Pause bot</button>
-        </div>
+        <div class="actions"><button class="btn" id="btn-pause">Pause bot</button></div>
       </header>
       <div class="kpis">
         <div class="kpi"><span>Balance (fake USDT)</span><b id="k-equity">–</b><small id="k-start"></small></div>
@@ -47,7 +49,7 @@
         <div class="kpi"><span>Today</span><b id="k-today">–</b><small>daily stop at −<span id="k-daylimit"></span>%</small></div>
         <div class="kpi"><span>Drop from peak</span><b id="k-dd">–</b><small>kill switch at −<span id="k-kill"></span>%</small></div>
       </div>
-      <div class="card research-bar" id="research-card">
+      <div class="card research-bar">
         <div class="card-head"><h2>Research (never stops)</h2><span class="muted small" id="research-state"></span></div>
         <div class="pipeline" id="pipeline"></div>
         <div class="bar"><i id="research-bar"></i></div>
@@ -57,16 +59,18 @@
         <div class="card">
           <div class="card-head"><h2>What the bot sees right now</h2><span class="muted small" id="radar-note"></span></div>
           <div class="table-wrap"><table class="radar"><thead><tr><th>Coin</th><th>Price</th><th>Strategy</th><th>Buy rules met</th><th>Waiting for</th><th>Status</th></tr></thead><tbody id="radar-body"></tbody></table></div>
-          <div id="radar-empty" class="empty hidden">No live strategies yet — research is finding the first ones.</div>
+          <div id="radar-empty" class="empty hidden">No LIVE strategies yet — research is finding the first ones.</div>
         </div>
         <div class="card">
-          <div class="card-head"><h2>Live activity</h2><span class="muted small">updates every few seconds</span></div>
-          <ul class="feed activity" id="activity"></ul>
+          <div class="card-head"><h2>Real-money readiness</h2><span class="pill off" id="ready-pill"></span></div>
+          <ul class="checks" id="ready-list"></ul>
+          <p class="muted small">Real-money trading is not built into TradBot. Only when every check is green for weeks is it worth talking about — and then only with a small amount.</p>
         </div>
       </div>
       <div class="grid2">
         <div class="card">
-          <div class="card-head"><h2>Balance over time</h2><span class="muted small">paper account</span></div>
+          <div class="card-head"><h2>Balance vs just holding the coins</h2>
+            <span class="muted small legend-inline"><span class="sw bot"></span>bot <span class="sw hold"></span>holding</span></div>
           <div id="equity-chart" class="chart"></div>
           <div id="equity-empty" class="empty hidden">No history yet — the balance is recorded every hour.</div>
         </div>
@@ -81,10 +85,6 @@
         <div class="table-wrap"><table><thead><tr><th>Coin</th><th>Strategy</th><th>Size</th><th>Entry</th><th>Now</th><th>Stop / Target</th><th>P/L</th></tr></thead><tbody id="open-body"></tbody></table></div>
         <div id="open-empty" class="empty">No open trades. The bot is waiting for a good setup.</div>
       </div>
-      <div class="card">
-        <div class="card-head"><h2>Latest events</h2></div>
-        <ul class="feed" id="feed"></ul>
-      </div>
     </section>
 
     <!-- LIVE -->
@@ -92,14 +92,19 @@
       <header class="head"><h1>Live</h1><span class="muted small" id="live-clock"></span></header>
       <div class="space card">
         <div class="map" id="map"></div>
-        <p class="muted small map-note">Each station lights up when it does something. Data flows left to right: research finds strategies → the live market test proves them → LIVE strategies scan the market → a signal must pass risk, news and AI checks → trade → lesson learned → better research.</p>
+        <p class="muted small map-note">Each station lights up when it does something. Research finds strategies → the live market test proves them → LIVE strategies scan the market → a signal must pass the filter, risk, news and AI checks → trade → lesson learned → better research.</p>
       </div>
       <div class="grid2 live-grid">
         <div class="card space-soft">
-          <div class="card-head"><h2>Timeline</h2><span class="muted small">newest on top · updates every 5 s</span></div>
+          <div class="card-head"><h2>Timeline</h2><span class="muted small">newest on top</span></div>
           <ol class="timeline" id="timeline"></ol>
         </div>
         <div class="side-col">
+          <div class="card">
+            <div class="card-head"><h2>AI coach</h2><span class="pill off" id="ai-pill"></span></div>
+            <div id="ai-report" class="ai-report muted">No AI report yet.</div>
+            <ul class="headlines" id="ai-recent"></ul>
+          </div>
           <div class="card">
             <div class="card-head"><h2>News mood</h2><span class="muted small" id="news-note"></span></div>
             <div id="news-mood" class="mood"></div>
@@ -128,12 +133,12 @@
         <p><b>How strategies move:</b> the bot invents strategies non-stop → each must pass the history tests →
         it enters the <b>live market test</b> (shadow-traded on new candles it never saw) →
         if it makes money there it goes <b>LIVE</b> and trades the paper account → if it loses, it is <b>retired</b>.
-        When too few are proven yet, the best new ones trade on <b>probation</b>.</p>
+        Until enough are proven, the best new ones trade on <b>probation</b> (half size).</p>
       </div>
       <div class="pipeline big" id="pipeline2"></div>
       <div class="card">
         <div class="card-head"><h2>Strategy pool</h2><span class="muted small" id="pool-note"></span></div>
-        <div class="table-wrap"><table><thead><tr><th>ID</th><th>Stage</th><th>Buy rules</th><th>History test</th><th>Live market test</th><th>Paper account</th></tr></thead><tbody id="pool-body"></tbody></table></div>
+        <div class="table-wrap"><table><thead><tr><th>ID</th><th>Stage</th><th>Rules</th><th>History test</th><th>Live market test</th><th>Paper account</th></tr></thead><tbody id="pool-body"></tbody></table></div>
         <div id="pool-empty" class="empty">Research is starting — the first strategies appear here in a few minutes.</div>
       </div>
       <div class="card">
@@ -143,29 +148,19 @@
       </div>
     </section>
 
-    <!-- TRADES -->
-    <section id="tab-trades" class="tab">
-      <header class="head"><h1>Trade history</h1><span class="muted" id="trade-stats"></span></header>
-      <div class="card"><div class="table-wrap"><table><thead><tr><th>Closed</th><th>Coin</th><th>Strategy</th><th>Entry</th><th>Exit</th><th>Why sold · lesson</th><th>P/L</th></tr></thead><tbody id="trades-body"></tbody></table></div>
-        <div id="trades-empty" class="empty">No finished trades yet.</div></div>
-    </section>
-
-    <!-- AI -->
-    <section id="tab-ai" class="tab">
-      <header class="head"><h1>AI Brain</h1><span class="pill" id="ai-pill"></span></header>
-      <div class="card explain">
-        <p>The AI brain suggests strategy ideas, reviews each buy (it may <b>block</b> a trade, never force one) and writes a daily report. Its ideas still must pass the Strategy Lab tests, and it can never skip the risk rules.</p>
-      </div>
-      <div class="card"><div class="card-head"><h2>AI messages</h2></div><ul class="feed" id="ai-feed"></ul>
-        <div id="ai-empty" class="empty">No AI messages yet. Add a free Gemini key in Settings to turn the AI brain on.</div></div>
+    <!-- JOURNAL -->
+    <section id="tab-journal" class="tab">
+      <header class="head"><h1>Trade journal</h1><span class="muted" id="trade-stats"></span></header>
+      <div class="card"><div class="table-wrap"><table class="journal"><thead><tr><th>Closed</th><th>Coin</th><th>Why it bought</th><th>Why it sold · lesson</th><th>P/L</th></tr></thead><tbody id="trades-body"></tbody></table></div>
+        <div id="trades-empty" class="empty">No finished trades yet. Every trade will appear here with the reason it was bought and sold, and the lesson learned.</div></div>
     </section>
 
     <!-- BACKTEST -->
     <section id="tab-backtest" class="tab">
-      <header class="head"><h1>Backtest</h1><div class="actions"><button class="btn primary" id="btn-backtest">Run backtest</button></div></header>
-      <div class="card"><div class="card-head"><h2>Active strategies vs buy &amp; hold (all history)</h2></div>
+      <header class="head"><h1>Backtest</h1><div class="actions"><button class="btn" id="btn-backtest">Refresh now</button></div></header>
+      <div class="card"><div class="card-head"><h2>LIVE strategies vs buy &amp; hold (all history)</h2><span class="muted small" id="bt-updated"></span></div>
         <div id="bt-chart" class="chart tall"></div>
-        <div id="bt-empty" class="empty hidden">No backtest yet. Click “Run backtest”.</div>
+        <div id="bt-empty" class="empty hidden">No backtest yet — it is updated automatically every hour once strategies are LIVE.</div>
         <p class="muted small">Starting value = 1.0 (e.g. 1.10 = +10%). Fees and slippage included. Each strategy risks at most <span class="bt-pos"></span>% per trade, so its line moves less than buy &amp; hold.</p>
       </div>
       <div class="card"><div class="table-wrap"><table><thead><tr><th>Strategy</th><th>Coin</th><th>Trades</th><th>Win rate</th><th>Return</th><th>Max drop</th><th>Sharpe</th><th>Buy &amp; hold</th></tr></thead><tbody id="bt-body"></tbody></table></div></div>
@@ -173,30 +168,66 @@
 
     <!-- SETTINGS -->
     <section id="tab-settings" class="tab">
-      <header class="head"><h1>Settings</h1></header>
-      <div class="card">
-        <h2>AI brain</h2>
-        <form id="ai-form" class="form" autocomplete="off">
-          <label>Provider
-            <select name="provider"><option value="gemini">Gemini (free tier)</option><option value="claude">Claude (paid)</option><option value="none">None (rules + ML only)</option></select>
-          </label>
-          <label>Gemini API key <input name="gemini_key" type="password" placeholder="paste key from aistudio.google.com"></label>
-          <label>Claude API key <input name="claude_key" type="password" placeholder="optional, from console.anthropic.com"></label>
-          <div class="row"><button class="btn primary" type="submit">Save</button><button class="btn" type="button" id="btn-test-ai">Test AI</button><span id="ai-result" class="muted small"></span></div>
-          <p class="muted small">Keys are saved only on this PC in the <code>.env</code> file. Never share them.</p>
-        </form>
-      </div>
-      <div class="card">
-        <h2>Risk rules <span class="muted small">(change in config.yaml, then restart)</span></h2>
-        <dl class="status" id="risk-list"></dl>
-      </div>
-      <div class="card danger">
-        <h2>Controls</h2>
-        <div class="row wrap">
-          <button class="btn" id="btn-reset-kill">Reset kill switch</button>
-          <button class="btn danger" id="btn-reset-account">Reset paper account</button>
+      <header class="head"><h1>Settings</h1><span class="muted small" id="set-version"></span></header>
+      <div class="grid2 settings-grid">
+        <div class="side-col">
+          <div class="card">
+            <h2>AI brain</h2>
+            <form id="ai-form" class="form" autocomplete="off">
+              <label>Provider
+                <select name="provider"><option value="gemini">Gemini (free tier)</option><option value="claude">Claude (paid)</option><option value="none">None (rules + ML only)</option></select>
+              </label>
+              <label>Gemini API key <input name="gemini_key" type="password" placeholder="paste key from aistudio.google.com"></label>
+              <label>Claude API key <input name="claude_key" type="password" placeholder="optional, from console.anthropic.com"></label>
+              <div class="row wrap"><button class="btn primary" type="submit">Save</button><button class="btn" type="button" id="btn-test-ai">Test AI</button><span id="ai-result" class="muted small"></span></div>
+              <p class="muted small">Keys are saved only on this PC in the <code>.env</code> file. Never share them.</p>
+            </form>
+          </div>
+          <div class="card">
+            <div class="card-head"><h2>Phone alerts (Telegram, free)</h2><span class="pill off" id="tg-pill">off</span></div>
+            <ol class="steps">
+              <li>In Telegram, open <b>@BotFather</b>, send <code>/newbot</code>, choose any name. Copy the token it gives you.</li>
+              <li>Paste the token here and click <b>Connect</b>.</li>
+              <li>Open your new bot in Telegram, press <b>Start</b> (or send <code>/start</code>), then click <b>Connect</b> again.</li>
+            </ol>
+            <form id="tg-form" class="form" autocomplete="off">
+              <label>Bot token <input name="token" type="password" placeholder="123456:ABC... (from @BotFather)"></label>
+              <div class="row wrap"><button class="btn primary" type="submit">Connect</button><button class="btn" type="button" id="btn-tg-test">Send test</button><button class="btn danger" type="button" id="btn-tg-off">Disconnect</button></div>
+              <span id="tg-result" class="muted small"></span>
+            </form>
+            <p class="muted small">You get: every buy and sell with the reason, kill-switch alerts, internet-back alerts and a daily summary.</p>
+          </div>
         </div>
-        <p class="muted small">Resetting the paper account deletes fake balance and trade history and starts again from the starting balance.</p>
+        <div class="side-col">
+          <div class="card">
+            <h2>Backups &amp; updates</h2>
+            <p class="muted small">Your balance, trades and strategies are backed up automatically every day (kept 7 days in <code>data\backups</code>).</p>
+            <div class="row wrap">
+              <a class="btn" id="btn-backup" href="/api/backup/download">Download backup</a>
+              <label class="btn">Restore backup… <input type="file" id="file-restore" accept=".zip" hidden></label>
+            </div>
+            <hr>
+            <p class="small"><b>Update TradBot:</b> download the newest ZIP from GitHub (Code → Download ZIP), then choose it here. Your data, keys and settings are kept, and the bot restarts by itself.</p>
+            <label class="btn primary">Install update from ZIP… <input type="file" id="file-update" accept=".zip" hidden></label>
+            <p class="muted small" id="upd-result"></p>
+          </div>
+          <div class="card">
+            <div class="card-head"><h2>System health</h2><button class="btn" id="btn-restart">Restart bot</button></div>
+            <dl class="status" id="health-list"></dl>
+          </div>
+          <div class="card">
+            <h2>Risk rules <span class="muted small">(change in config.yaml, then restart)</span></h2>
+            <dl class="status" id="risk-list"></dl>
+          </div>
+          <div class="card danger">
+            <h2>Controls</h2>
+            <div class="row wrap">
+              <button class="btn" id="btn-reset-kill">Reset kill switch</button>
+              <button class="btn danger" id="btn-reset-account">Reset paper account</button>
+            </div>
+            <p class="muted small">Resetting the paper account deletes the fake balance and trade history and starts again from the starting balance.</p>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -207,6 +238,7 @@
     </section>
   </main>
 </div>
+<div id="overlay" class="overlay hidden"><div class="card"><h2 id="ov-title">Restarting…</h2><p class="muted" id="ov-msg">TradBot is restarting. This page reloads by itself.</p><div class="bar"><i class="indeterminate"></i></div></div></div>
 <div id="toast" class="toast hidden"></div>
 <script src="vendor/lightweight-charts.js"></script>
 <script src="app.js"></script>

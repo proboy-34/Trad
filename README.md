@@ -4,6 +4,8 @@ TradBot invents its own trading strategies, tests them honestly, and trades
 them automatically with **fake money** (paper trading) on live Binance prices.
 It has a dashboard that opens in your browser.
 
+**Version 2** — see [CHANGELOG.md](CHANGELOG.md) for what's new.
+
 > **Safety first.** This version can only paper trade. There is no real-money
 > code at all. Real money comes later, only after the bot proves itself
 > (see [When can I use real money?](#when-can-i-use-real-money)).
@@ -56,6 +58,10 @@ more trades come in. Its status is shown on the Live page under "What the bot le
 
 ## Safety details
 
+- **Max 2 new trades per hour:** crypto coins usually move together, so many buys at once would be the same bet.
+- **Trailing stop / break-even:** many strategies move their stop-loss up as the price rises, locking in profit.
+- **One bad coin can't stop the others:** if a coin has no data (delisted, timeout), the rest keep trading.
+- **Typos can't crash it:** a broken `config.yaml` falls back to safe defaults and the dashboard tells you.
 - **No double buys after a crash:** the bot remembers on disk which candle it already decided on.
 - **Breadth test:** a strategy must make money on at least half of the coins on unseen data, not just
   one lucky coin.
@@ -69,7 +75,23 @@ Click **Live** in the sidebar. It is the bot's mission control:
   A station glows when it is doing something right now, and the line to the next one starts flowing.
 - **Timeline:** every step, newest on top (scans, research rounds, signals, checks, trades, lessons).
 - **News mood:** a score per coin from −1 (bad) to +1 (good), plus the latest headlines.
+- **AI coach:** the AI's daily review (mistakes and what to watch) and its latest trade reviews.
 - **What the bot learned:** its win/loss record, most common mistake, and which coins or strategies now trade smaller.
+
+## Phone alerts (Telegram, free, optional)
+
+Get every buy and sell (with the reason), the daily summary and kill-switch alerts on your phone:
+1. In Telegram open **@BotFather**, send `/newbot`, choose any name, copy the token.
+2. Dashboard → **Settings → Phone alerts**: paste the token, click **Connect**.
+3. Open your new bot in Telegram, press **Start**, then click **Connect** again. A test message arrives.
+
+## Updates and backups (no more copying files)
+
+- **Update:** download the newest ZIP from GitHub (Code → Download ZIP), then dashboard →
+  **Settings → Install update from ZIP**. Your data, keys and settings are kept, the old code is saved
+  in `data\backups`, and the bot restarts by itself with the new version.
+- **Backups:** made automatically every day (last 7 kept in `data\backups`). **Download backup** gives you a
+  file to keep on Google Drive / USB; **Restore backup** puts one back (the current data is saved first).
 
 ## Install and run on Windows: ONE file does everything
 
@@ -107,10 +129,10 @@ The bot limits itself to 20 AI calls per hour to stay inside the free tier.
 
 - Run `TradBot.bat` and leave it running (or let it auto-start with Windows). The bot works 24/7 while the window is open.
 - Check the dashboard once a day (5 minutes):
-  - **Overview:** balance, today's result, open trades, latest events.
+  - **Overview:** balance vs just holding the coins, the real-money readiness checklist, what the bot sees, open trades.
+  - **Live:** the timeline of everything the bot did, AI coach, news, lessons.
+  - **Journal:** every finished trade: why it bought, why it sold, and the lesson.
   - **Strategies:** what each strategy does, in plain English, with honest test results.
-  - **Trades:** every finished trade and why it was sold.
-  - **AI Brain:** the AI's reviews and daily reports.
 - If the PC turns off, just run `TradBot.bat` again (or it starts by itself if you chose auto-start). Open trades are remembered, and
   stop-losses that were hit while it was off are applied.
 
@@ -123,9 +145,14 @@ Open the folder, click the address bar, type `cmd` and press Enter. Then:
 Checks the install, the Binance connection and the AI key.
 
 ```bash
+.venv\Scripts\python main.py install
+```
+Repairs / re-installs the libraries.
+
+```bash
 .venv\Scripts\python main.py lab
 ```
-Runs the Strategy Lab once and prints the results.
+Runs one research round and prints the results.
 
 ```bash
 .venv\Scripts\python main.py backtest
@@ -167,7 +194,7 @@ Each strategy shows three test periods:
 
 ## When can I use real money?
 
-Only when **all** of these are true:
+The **Real-money readiness** card on the Overview checks this for you automatically. Only when **all** of these are true:
 
 - [ ] At least **4–8 weeks** of paper trading, with **30+ finished trades**
 - [ ] Paper profit is **positive after fees**
@@ -188,7 +215,10 @@ Restart the bot after changing it. The most useful ones:
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `symbols` | BTC/USDT, ETH/USDT | Coins to trade |
+| `symbols` | BTC, ETH, SOL, BNB, XRP, DOGE | Coins to trade |
+| `eco_mode` | true | Low CPU priority, so your PC stays fast |
+| `risk.max_new_per_candle` | 2 | Max new trades per hour |
+| `notify.daily_hour` | 21 | Local time of the daily summary |
 | `risk.max_position_pct` | 25 | Max % of the balance per trade |
 | `risk.daily_loss_limit_pct` | 5 | Stop for the day after this loss |
 | `risk.kill_switch_drawdown_pct` | 20 | Stop everything after this drop from the peak |
@@ -206,7 +236,9 @@ Restart the bot after changing it. The most useful ones:
 | Problem | Fix |
 |---|---|
 | "Could not install Python automatically" | Install Python 3.12 from python.org and tick **"Add python.exe to PATH"**, then open `TradBot.bat` again. |
-| "Installing libraries failed" | Check your internet and open `TradBot.bat` again. Python 3.10–3.14 is supported. |
+| "Installing libraries failed" | Check your internet and open `TradBot.bat` again. Python 3.10–3.14 is supported. If only the ML library fails, TradBot still runs without the ML model (Settings → System health shows it). |
+| "Update not finished" banner | The running bot is older than the page. Settings → **Restart bot**, or close the black window and open `TradBot.bat`. |
+| A yellow note "Setting fixed: …" | A value in `config.yaml` was impossible or had a typo; the bot used a safe value instead. Fix the file or download it again. |
 | "Could not reach Binance" | Check your internet. The bot automatically tries Binance's backup data server. It retries every minute. |
 | Dashboard doesn't open | Open <http://127.0.0.1:8050> yourself. Make sure the black TradBot window is still open. |
 | "Port 8050 in use" | Another copy is running. Close it, or change `dashboard.port` in `config.yaml`. |
@@ -223,8 +255,7 @@ Logs are saved in `data/bot.log`. If you need help, share that file (it contains
 ## 24/7 on a server (later)
 
 Your PC must stay on for the bot to trade. For the 4–8 week paper test, a small server is
-better. See **[docs/SERVER_SETUP.md](docs/SERVER_SETUP.md)**: **Hugging Face Spaces** (free, no card,
-automatic backup + restore), a free bot-hosting panel (TradBot uses only
+better. See **[docs/SERVER_SETUP.md](docs/SERVER_SETUP.md)**: a free bot-hosting panel (TradBot uses only
 ~170 MB RAM), Oracle Cloud free tier, or a ~$5/month VPS paid with USDT. On a server, start it with
 `python main.py run --server` and set `DASHBOARD_PASSWORD`.
 
@@ -251,9 +282,13 @@ tradbot/
   risk.py            risk manager
   paper.py           paper account database
   engine.py          runs everything automatically
+  notify.py          Telegram phone alerts
+  backup.py          daily backups, download / restore
+  updater.py         one-click update from a TradBot ZIP
+  installer.py       installs libraries (optional ones can't block the start)
   dashboard.py       dashboard web server
   web/               dashboard page (HTML/CSS/JS + chart library)
-tests/               safety tests (python -m pytest)
+tests/               safety tests (python -m pytest) - also run on Windows + Linux by GitHub
 data/                created automatically: prices, database, models, log
 ```
 

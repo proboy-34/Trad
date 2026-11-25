@@ -34,12 +34,19 @@ DEFAULTS = {
     "retire_after_trades": 6,
     "retire_if_profit_factor_below": 0.9,
     "retire_if_return_below_pct": -3.0,
+    "max_per_family": 12,     # max strategies using the same indicators (keeps research broad)
 }
 
 
 def _score_validation(e: dict) -> float:
     v, f = e["validation"], e.get("final") or {}
     return min(v.get("sharpe", 0), e["research"].get("sharpe", 0)) + 0.25 * f.get("sharpe", 0)
+
+
+def _final_ok(e: dict) -> bool:
+    """Also positive on the final test period (history never used for choosing)."""
+    f = e.get("final") or {}
+    return f.get("return_pct", 0) > 0 and f.get("sharpe", 0) > 0
 
 
 def _kind(e: dict) -> tuple:
@@ -94,8 +101,18 @@ class StrategyPool:
             st = result["stats"]
             known = {e["strategy"]["id"] for e in self.data["pool"]}
             known |= {e["strategy"]["id"] for e in self.data["retired"]}
-            new = [dict(e, stage="new", forward=None) for e in result["passed"]
-                   if e["strategy"]["id"] not in known]
+            family = {}
+            for e in self.data["pool"]:
+                family[_kind(e)] = family.get(_kind(e), 0) + 1
+            new = []
+            for e in result["passed"]:
+                if e["strategy"]["id"] in known:
+                    continue
+                k = _kind(e)
+                if family.get(k, 0) >= self.pc["max_per_family"]:
+                    continue                      # enough of this family already
+                family[k] = family.get(k, 0) + 1
+                new.append(dict(e, stage="new", forward=None))
             self.data["pool"].extend(new)
             # too many? drop the weakest NEW ones (live ones are never dropped here)
             if len(self.data["pool"]) > self.pc["max_size"]:
@@ -186,8 +203,10 @@ class StrategyPool:
                 staying.sort(key=_score_validation, reverse=True)
                 live += staying[: pc["min_live"] - len(live)]
                 ids = {x["strategy"]["id"] for x in live}
+                # best new ones first - preferring those that ALSO stayed positive on the
+                # final unseen test (less likely to have passed by luck)
                 rest = sorted([e for e in keep if e["strategy"]["id"] not in ids],
-                              key=_score_validation, reverse=True)
+                              key=lambda e: (_final_ok(e), _score_validation(e)), reverse=True)
                 # prefer DIFFERENT kinds of strategies (not 3 copies of one idea)
                 kinds = {_kind(x) for x in live}
                 for e in rest:

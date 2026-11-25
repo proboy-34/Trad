@@ -89,7 +89,7 @@ def keyword_score(title: str) -> float:
 
 class NewsWatcher:
     def __init__(self, cfg: dict, brain=None):
-        self.cfg = {"enabled": True, "refresh_minutes": 15, "block_below": -0.5,
+        self.cfg = {"enabled": True, "refresh_minutes": 30, "block_below": -0.5,
                     "market_block_below": -0.6, **(cfg.get("news") or {})}
         self.symbols = cfg["symbols"]
         self.brain = brain
@@ -98,6 +98,7 @@ class NewsWatcher:
         self.updated = 0.0
         self.source = "none"
         self.error = ""
+        self._feed_cache: dict[str, dict] = {}   # url -> {etag, modified, items} (saves internet)
 
     def due(self) -> bool:
         return (self.cfg["enabled"]
@@ -108,10 +109,22 @@ class NewsWatcher:
         self.updated = time.time()
         items, errors = [], 0
         for url in FEEDS:
+            cached = self._feed_cache.get(url, {})
+            headers = {"User-Agent": "tradbot/1.0"}
+            if cached.get("etag"):
+                headers["If-None-Match"] = cached["etag"]
+            if cached.get("modified"):
+                headers["If-Modified-Since"] = cached["modified"]
             try:
-                r = requests.get(url, timeout=12, headers={"User-Agent": "tradbot/1.0"})
-                if r.status_code == 200:
-                    items += parse_rss(r.text)
+                r = requests.get(url, timeout=12, headers=headers)
+                if r.status_code == 304 and "items" in cached:     # unchanged: nothing downloaded
+                    items += [it for it in cached["items"] if time.time() - it["time"] <= 86400]
+                elif r.status_code == 200:
+                    got = parse_rss(r.text)
+                    self._feed_cache[url] = {"etag": r.headers.get("ETag"),
+                                             "modified": r.headers.get("Last-Modified"),
+                                             "items": got}
+                    items += got
                 else:
                     errors += 1
             except requests.RequestException:

@@ -76,6 +76,7 @@ def test_rss_parsing_and_keywords():
 class FakeResp:
     status_code = 200
     text = RSS
+    headers = {"ETag": '"v1"'}
 
 
 def test_news_blocks_buys_on_bad_news(monkeypatch):
@@ -87,3 +88,23 @@ def test_news_blocks_buys_on_bad_news(monkeypatch):
     assert w.blocks("ETH/USDT") and "hacked" in w.blocks("ETH/USDT")
     assert w.blocks("BTC/USDT") is None
     assert not w.due()
+
+
+def test_unchanged_feeds_are_not_downloaded_again(monkeypatch):
+    seen_headers = []
+
+    def get(url, timeout, headers):
+        seen_headers.append(headers)
+        if headers.get("If-None-Match") == '"v1"':
+            r = FakeResp()
+            r.status_code, r.text = 304, ""
+            return r
+        return FakeResp()
+
+    monkeypatch.setattr(news_mod.requests, "get", get)
+    w = NewsWatcher(_merge(DEFAULTS, {"symbols": ["BTC/USDT", "ETH/USDT"]}))
+    w.refresh()
+    first = len(w.items)
+    w.refresh()                                   # second time: server says "not modified"
+    assert any(h.get("If-None-Match") == '"v1"' for h in seen_headers)
+    assert len(w.items) == first and w.blocks("ETH/USDT")   # cached headlines still used

@@ -153,6 +153,22 @@ def fetch_recent(symbol: str, timeframe: str, bars: int = 400,
     return clean(df if include_open else drop_unclosed(df, timeframe))
 
 
+def refresh_recent(cache: pd.DataFrame | None, symbol: str, timeframe: str,
+                   bars: int = 300) -> pd.DataFrame:
+    """Keeps a window of the latest candles (including the one still forming) up to date
+    with tiny downloads: the first call gets `bars` candles, later calls only the newest
+    1-2 candles. Saves ~99% of internet data compared with downloading everything again."""
+    step = TF_MS[timeframe]
+    now = int(time.time() * 1000)
+    if cache is None or cache.empty or now - int(cache["time"].iloc[-1]) > bars * step // 2:
+        df = fetch_klines(symbol, timeframe, now - (bars + 2) * step)
+    else:
+        # from the last cached candle on: it may have been unfinished, so get it again
+        new = fetch_klines(symbol, timeframe, int(cache["time"].iloc[-1]))
+        df = pd.concat([cache, new], ignore_index=True).drop_duplicates("time", keep="last")
+    return clean(df).tail(bars).reset_index(drop=True)
+
+
 def fetch_price(symbol: str) -> float:
     data = _get("/api/v3/ticker/price", {"symbol": to_binance_symbol(symbol)})
     return float(data["price"])
