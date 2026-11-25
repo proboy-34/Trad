@@ -24,8 +24,16 @@ const ago = (t) => {
 const until = (t) => { const s = t - Date.now() / 1000; return s <= 0 ? "now" : s < 3600 ? Math.round(s / 60) + " min" : Math.round(s / 3600) + " h"; };
 const dt = (t) => new Date(t * 1000).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 
+// On hosted servers (e.g. Hugging Face) ask less often, so their rate limit is not hit.
+const HOSTED = !["127.0.0.1", "localhost"].includes(location.hostname);
+const TICK_MS = HOSTED ? 20000 : 5000;
+let pausedUntil = 0;
 async function get(path) {
   const r = await fetch("/api/" + path, { cache: "no-store" });
+  if (r.status === 429) {                       // rate limited: wait a minute, then continue
+    pausedUntil = Date.now() + 60000;
+    $("conn").textContent = "server asked to slow down - pausing 1 min";
+  }
   if (!r.ok) throw new Error(path + " " + r.status);
   return r.json();
 }
@@ -390,11 +398,10 @@ async function refreshAll() {
 }
 let ticks = 0;
 setInterval(() => {
-  if (document.hidden) return;              // no work while you look elsewhere
+  if (document.hidden || Date.now() < pausedUntil) return;   // no work while hidden / rate limited
   ticks++;
-  const jobRunning = state.last?.job?.name;
-  if (jobRunning || ticks % 1 === 0) loadState().catch(() => ($("conn").textContent = "bot not reachable — is it running?"));
-  if (ticks % 6 === 0 || state.tab === "log") refreshTab();
-}, 5000);
+  loadState().catch(() => { if (Date.now() >= pausedUntil) $("conn").textContent = "bot not reachable — is it running?"; });
+  if (ticks % (HOSTED ? 3 : 6) === 0 || state.tab === "log") refreshTab();
+}, TICK_MS);
 document.addEventListener("visibilitychange", () => { if (!document.hidden) refreshAll(); });
 refreshAll();
