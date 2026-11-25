@@ -22,7 +22,7 @@ def _ensure_libraries():
     """Hosting panels sometimes don't run 'pip install'. If a library is missing,
     install everything from requirements.txt once, then continue."""
     import importlib.util
-    needed = ["numpy", "pandas", "requests", "yaml", "lightgbm"]
+    needed = ["numpy", "pandas", "requests", "yaml", "lightgbm", "huggingface_hub"]
     if all(importlib.util.find_spec(m) for m in needed):
         return
     import subprocess
@@ -125,14 +125,28 @@ def cmd_report(cfg):
 
 
 def cmd_run(cfg, open_browser=True):
+    from tradbot.cloudsync import CloudSync
     from tradbot.dashboard import serve
     from tradbot.engine import Engine
+    sync = CloudSync()
+    sync.restore()                 # servers without lasting files: get the last backup first
     engine = Engine(cfg)
+    engine.sync = sync
     engine.start()
+    sync.start(engine._stop)
+    import signal
+
+    def _stop_now(*_):            # servers stop apps with SIGTERM: back up first
+        raise SystemExit(0)
+    try:
+        signal.signal(signal.SIGTERM, _stop_now)
+    except (ValueError, AttributeError):
+        pass
     try:
         serve(engine, open_browser=open_browser)
     finally:
         engine.stop()
+        sync.backup()
         print("Bot stopped. Open trades are saved and will continue next start.")
 
 

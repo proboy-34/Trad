@@ -223,7 +223,8 @@ Logs are saved in `data/bot.log`. If you need help, share that file (it contains
 ## 24/7 on a server (later)
 
 Your PC must stay on for the bot to trade. For the 4–8 week paper test, a small server is
-better. See **[docs/SERVER_SETUP.md](docs/SERVER_SETUP.md)**: a free bot-hosting panel (TradBot uses only
+better. See **[docs/SERVER_SETUP.md](docs/SERVER_SETUP.md)**: **Hugging Face Spaces** (free, no card,
+automatic backup + restore), a free bot-hosting panel (TradBot uses only
 ~170 MB RAM), Oracle Cloud free tier, or a ~$5/month VPS paid with USDT. On a server, start it with
 `python main.py run --server` and set `DASHBOARD_PASSWORD`.
 

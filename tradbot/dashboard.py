@@ -62,6 +62,7 @@ class API:
                                                     -r["met"] / max(1, r["total"])))[:10],
             "activity": list(e.activity)[-80:][::-1], "scan_seconds": e.scan_sec,
             "news": e.news.status(), "filter": e.filter.report,
+            "backup": getattr(getattr(e, "sync", None), "status", None),
             "learning": {k: e.adjust.get(k) for k in ("insights", "mistakes", "coins", "strategies")},
             "risk": e.cfg["risk"], "symbols": e.cfg["symbols"], "timeframe": e.tf,
             "server_time": time.time(), "version": __version__,
