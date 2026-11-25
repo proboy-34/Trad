@@ -30,6 +30,7 @@ def _ensure_libraries():
     req = Path(__file__).resolve().parent / "requirements.txt"
     print("Some libraries are missing - installing them now (one time, a few minutes)...", flush=True)
     subprocess.check_call([sys.executable, "-m", "pip", "install", "--disable-pip-version-check",
+                           "--no-cache-dir",
                            "-r", str(req)])
     importlib.invalidate_caches()
 
