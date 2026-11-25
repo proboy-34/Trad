@@ -147,18 +147,21 @@ def make_db(path):
 def test_backup_restore_roundtrip(tmp_path):
     src = tmp_path / "src"
     src.mkdir()
-    make_db(src / "tradbot.db")
+    make_db(src / "tradbot.db").db.close()
     (src / "strategies.json").write_text('{"pool": [1]}')
     (src / "models").mkdir()
     (src / "models" / "BTCUSDT.pkl").write_bytes(b"m")
     blob = backup.build_zip(src, src / "tradbot.db")
     dst = tmp_path / "dst"
     dst.mkdir()
-    make_db(dst / "tradbot.db").update_account(cash=1.0)
+    acc = make_db(dst / "tradbot.db")
+    acc.update_account(cash=1.0)
+    acc.db.close()                  # like the real start-up: restore happens before the DB is opened
     backup.stage_restore(blob, dst)
     assert backup.apply_pending(dst, dst / "tradbot.db")
     con = sqlite3.connect(str(dst / "tradbot.db"))
     assert con.execute("SELECT cash FROM account").fetchone()[0] == 1234.5
+    con.close()
     assert (dst / "strategies.json").read_text() == '{"pool": [1]}'
     assert list((dst / "backups").glob("before-restore-*.zip"))          # undo is possible
 
@@ -174,7 +177,7 @@ def test_restore_rejects_bad_files(tmp_path):
 
 
 def test_daily_backup_keeps_last_days(tmp_path):
-    make_db(tmp_path / "tradbot.db")
+    make_db(tmp_path / "tradbot.db").db.close()
     out = tmp_path / "backups"
     out.mkdir()
     for d in range(1, 10):
