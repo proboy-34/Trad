@@ -14,7 +14,8 @@ DATA_DIR = ROOT / "data"          # downloaded candles, database, models
 STATE_DB = DATA_DIR / "tradbot.db"
 
 DEFAULTS: dict = {
-    "symbols": ["BTC/USDT", "ETH/USDT"],
+    "symbols": ["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT", "DOGE/USDT"],
+    "scan_seconds": 30,
     "timeframe": "1h",
     "history_days": 1095,
     "mode": "paper",
@@ -29,13 +30,29 @@ DEFAULTS: dict = {
     "lab": {
         "population": 300,
         "generations": 4,
-        "keep_top": 3,
+        "keep_top": 5,
         "min_trades": 30,
         "max_drawdown_pct": 20,
         "split": [0.6, 0.2, 0.2],
-        "auto_run_weekday": 6,
-        "auto_run_hour_utc": 2,
         "batch_size": 50,
+    },
+    "research": {
+        "enabled": True,
+        "round_population": 150,
+        "round_generations": 2,
+        "pause_seconds": 20,
+        "refresh_minutes": 60,
+        "ai_ideas_every_rounds": 10,
+    },
+    "pool": {
+        "max_size": 300,
+        "max_live": 10,
+        "min_live": 3,
+        "promote_after_trades": 5,
+        "promote_min_profit_factor": 1.1,
+        "retire_after_trades": 6,
+        "retire_if_profit_factor_below": 0.9,
+        "retire_if_return_below_pct": -3.0,
     },
     "ml": {"enabled": True, "horizon_bars": 12, "target_pct": 0.6, "threads": 2},
     "brain": {
@@ -48,7 +65,6 @@ DEFAULTS: dict = {
         "use_news": True,
         "max_calls_per_hour": 20,
     },
-    "monitor": {"retire_after_trades": 10, "retire_if_profit_factor_below": 0.8},
     "dashboard": {"host": "127.0.0.1", "port": 8050},
 }
 

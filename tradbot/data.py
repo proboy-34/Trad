@@ -144,10 +144,13 @@ def update_history(symbol: str, timeframe: str, days: int) -> pd.DataFrame:
     return df
 
 
-def fetch_recent(symbol: str, timeframe: str, bars: int = 400) -> pd.DataFrame:
-    """Latest closed candles, used by the live paper-trading loop."""
+def fetch_recent(symbol: str, timeframe: str, bars: int = 400,
+                 include_open: bool = False) -> pd.DataFrame:
+    """Latest candles for the live loop. Decisions use CLOSED candles only;
+    include_open=True adds the still-forming candle (live price / preview)."""
     start = int(time.time() * 1000) - (bars + 2) * TF_MS[timeframe]
-    return clean(drop_unclosed(fetch_klines(symbol, timeframe, start), timeframe))
+    df = fetch_klines(symbol, timeframe, start)
+    return clean(df if include_open else drop_unclosed(df, timeframe))
 
 
 def fetch_price(symbol: str) -> float:

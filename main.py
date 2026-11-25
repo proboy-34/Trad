@@ -57,21 +57,26 @@ def cmd_lab(cfg):
     from tradbot.brain import Brain
     from tradbot.engine import load_datasets, run_backtest
     from tradbot.lab import Lab
+    from tradbot.pool import StrategyPool
     print("Downloading / updating price history...")
     ds = load_datasets(cfg)
     brain = Brain(cfg)
-    res = Lab(cfg, ds, brain=brain if brain.available() else None, progress=_progress).run()
-    st = res["stats"]
+    pool = StrategyPool(cfg)
+    res = Lab(cfg, ds, brain=brain if brain.available() else None, progress=_progress).run(
+        seeds=pool.seeds(20))
+    new = pool.add_round(res)
+    pool.forward_test(ds, res["probs"], cfg["timeframe"])
+    for m in pool.review():
+        print(" ", m)
+    st, c = res["stats"], pool.counts()
     print(f"\nTested {st['tested']} strategies, {st['passed_validation']} passed the unseen-data test, "
-          f"{st['chosen']} chosen.\n")
-    for a in res["active"]:
-        print(a["strategy"]["id"], "-", a["description"]["buy"])
-        print("   ", a["description"]["sell"])
-        f = a["final"]
-        print(f"    final honest test: return {f['return_pct']:+.2f}% (buy & hold {f['buy_hold_return_pct']:+.1f}%),"
-              f" max drop {f['max_dd_pct']:.1f}%, {f['trades']} trades\n")
-    if not res["active"]:
-        print("No strategy passed. The bot will not trade - that is the safe choice.")
+          f"{new} new added to the pool.")
+    print(f"Pool: {c['testing']} in live market test, {c['live']} LIVE, {c['retired']} retired.\n")
+    for e in pool.entries("live"):
+        f = e["final"]
+        print(e["strategy"]["id"], "-", e["description"]["buy"])
+        print(f"    final honest test: return {f['return_pct']:+.2f}% (buy & hold "
+              f"{f['buy_hold_return_pct']:+.1f}%), max drop {f['max_dd_pct']:.1f}%, {f['trades']} trades\n")
     run_backtest(cfg, ds)
 
 

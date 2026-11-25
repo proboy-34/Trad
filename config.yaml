@@ -8,9 +8,17 @@
 symbols:
   - BTC/USDT
   - ETH/USDT
+  - SOL/USDT
+  - BNB/USDT
+  - XRP/USDT
+  - DOGE/USDT
 
 # Candle size. 1h = one candle per hour (recommended)
 timeframe: 1h
+
+# How often (seconds) the bot scans live prices, checks stop-losses and
+# updates the "what the bot sees" panel. Buy decisions happen when a candle closes.
+scan_seconds: 30
 
 # How many days of price history to download for research
 history_days: 1095          # about 3 years
@@ -38,19 +46,40 @@ risk:
   min_trade_usdt: 10        # don't open trades smaller than this
 
 # ---------------------------------------------------------------------
-#  STRATEGY LAB - the bot's research team
+#  STRATEGY LAB - how strategies are tested on history
 # ---------------------------------------------------------------------
 lab:
-  population: 300           # random strategy ideas per generation
-  generations: 4            # rounds of "improve the best ideas"
-  keep_top: 3               # how many strategies go to paper trading
+  population: 300           # strategy ideas per generation (CLI "lab" command)
+  generations: 4
   min_trades: 30            # ignore strategies with fewer trades (luck)
   max_drawdown_pct: 20      # ignore strategies that fell more than this
   # Split of history: research | validation (unseen) | final test (unseen)
   split: [0.6, 0.2, 0.2]
-  auto_run_weekday: 6       # 0=Monday ... 6=Sunday (weekly re-research)
-  auto_run_hour_utc: 2
   batch_size: 50            # smaller = less memory, slower (low-end PC)
+
+# ---------------------------------------------------------------------
+#  NON-STOP RESEARCH - the bot never stops inventing and testing
+# ---------------------------------------------------------------------
+research:
+  enabled: true
+  round_population: 150     # new ideas per round (plus ideas evolved from the best)
+  round_generations: 2      # improvement rounds inside each research round
+  pause_seconds: 20         # short break between rounds (bigger = PC stays cooler)
+  refresh_minutes: 60       # download new candles + re-run the live market test
+  ai_ideas_every_rounds: 10 # ask the AI brain for ideas every N rounds
+
+# ---------------------------------------------------------------------
+#  STRATEGY POOL - new -> live market test -> LIVE -> retired
+# ---------------------------------------------------------------------
+pool:
+  max_size: 300             # strategies being tested at the same time
+  max_live: 10              # strategies allowed to trade the paper account
+  min_live: 3               # if fewer are proven, best new ones trade on probation
+  promote_after_trades: 5   # live-market-test trades needed before promotion
+  promote_min_profit_factor: 1.1
+  retire_after_trades: 6
+  retire_if_profit_factor_below: 0.9
+  retire_if_return_below_pct: -3.0
 
 # ---------------------------------------------------------------------
 #  MACHINE LEARNING model (LightGBM)
@@ -75,13 +104,6 @@ brain:
   daily_report: true
   use_news: true            # Gemini: search the web for crypto news
   max_calls_per_hour: 20    # stay well inside free-tier limits
-
-# ---------------------------------------------------------------------
-#  Live strategy monitoring - retire strategies that fail in paper
-# ---------------------------------------------------------------------
-monitor:
-  retire_after_trades: 10       # judge only after this many trades
-  retire_if_profit_factor_below: 0.8
 
 # ---------------------------------------------------------------------
 #  Dashboard (opens in your web browser)

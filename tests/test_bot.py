@@ -113,17 +113,26 @@ def test_unseen_test_rules():
     assert not passes_unseen_test({**good, "return_pct": -0.5}, 10, 20)   # small loss = fail
 
 
-def test_lab_runs_end_to_end(tmp_path, monkeypatch):
+def test_lab_round_and_pool_end_to_end(tmp_path, monkeypatch):
     import tradbot.lab as lab
+    from tradbot.pool import StrategyPool
     monkeypatch.setattr(lab, "STRATEGIES_FILE", tmp_path / "s.json")
-    monkeypatch.setattr(lab, "LAB_HISTORY_FILE", tmp_path / "h.json")
     monkeypatch.setattr(ml, "MODEL_DIR", tmp_path / "models")
     c = cfg(lab={"population": 40, "generations": 2}, ml={"enabled": False})
     ds = {"A/USDT": compute_features(data.synthetic_candles(5000, seed=5)),
           "B/USDT": compute_features(data.synthetic_candles(5000, seed=6, start_price=2000))}
     res = Lab(c, ds, seed=1).run()
     assert res["stats"]["tested"] >= 40
-    assert json.loads((tmp_path / "s.json").read_text())["stats"]["tested"] == res["stats"]["tested"]
+    pool = StrategyPool(c)
+    fake = res["passed"] or [{"strategy": Strategy(entry=[Condition("rsi_14", "<", 40)]).to_dict(),
+                              "description": {}, "research": {"sharpe": 1}, "validation": {"sharpe": 1},
+                              "final": {}, "added": 0}]
+    pool.add_round({"passed": fake, "stats": res["stats"]})
+    pool.forward_test(ds, {}, "1h")
+    pool.review()
+    saved = json.loads((tmp_path / "s.json").read_text())
+    assert saved["pool"] and saved["active"]          # something is live (probation)
+    assert all(e["stage"] == "live" for e in saved["active"])
 
 
 # ---------------------------------------------------------- paper+risk

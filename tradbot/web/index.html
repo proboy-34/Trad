@@ -22,8 +22,9 @@
       <button data-tab="log">Log</button>
     </nav>
     <div class="nav-foot">
+      <div class="heartbeat"><span class="pulse" id="pulse"></span><span id="hb">connecting…</span></div>
       <div class="pill" id="mode-pill">PAPER MODE · fake money</div>
-      <div class="muted small" id="conn">connecting…</div>
+      <div class="muted small" id="conn"></div>
     </div>
   </aside>
 
@@ -44,6 +45,23 @@
         <div class="kpi"><span>Total profit / loss</span><b id="k-total">–</b><small id="k-total-usd"></small></div>
         <div class="kpi"><span>Today</span><b id="k-today">–</b><small>daily stop at −<span id="k-daylimit"></span>%</small></div>
         <div class="kpi"><span>Drop from peak</span><b id="k-dd">–</b><small>kill switch at −<span id="k-kill"></span>%</small></div>
+      </div>
+      <div class="card research-bar" id="research-card">
+        <div class="card-head"><h2>Research (never stops)</h2><span class="muted small" id="research-state"></span></div>
+        <div class="pipeline" id="pipeline"></div>
+        <div class="bar"><i id="research-bar"></i></div>
+        <div class="muted small" id="research-msg"></div>
+      </div>
+      <div class="grid2">
+        <div class="card">
+          <div class="card-head"><h2>What the bot sees right now</h2><span class="muted small" id="radar-note"></span></div>
+          <div class="table-wrap"><table class="radar"><thead><tr><th>Coin</th><th>Price</th><th>Strategy</th><th>Buy rules met</th><th>Waiting for</th><th>Status</th></tr></thead><tbody id="radar-body"></tbody></table></div>
+          <div id="radar-empty" class="empty hidden">No live strategies yet — research is finding the first ones.</div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>Live activity</h2><span class="muted small">updates every few seconds</span></div>
+          <ul class="feed activity" id="activity"></ul>
+        </div>
       </div>
       <div class="grid2">
         <div class="card">
@@ -77,17 +95,23 @@
 
     <!-- STRATEGIES -->
     <section id="tab-strategies" class="tab">
-      <header class="head"><h1>Strategies</h1><div class="actions"><button class="btn primary" id="btn-lab">Run Strategy Lab now</button></div></header>
-      <div class="card" id="lab-summary"></div>
-      <div id="strategy-list"></div>
+      <header class="head"><h1>Strategies</h1><div class="actions"><button class="btn" id="btn-lab">Pause research</button></div></header>
       <div class="card explain">
-        <h2>How to read this</h2>
-        <ul>
-          <li><b>Research</b> = the history the strategy was found on (it always looks good here).</li>
-          <li><b>Validation</b> = newer history it never saw. It had to pass here to be chosen.</li>
-          <li><b>Final test</b> = the newest history, never used for choosing. <b>This is the honest number.</b></li>
-          <li><b>Sharpe</b> = profit compared to how bumpy the ride was (above 1 is good). <b>Drawdown</b> = biggest fall.</li>
-        </ul>
+        <p><b>How strategies move:</b> the bot invents strategies non-stop → each must pass the history tests →
+        it enters the <b>live market test</b> (shadow-traded on new candles it never saw) →
+        if it makes money there it goes <b>LIVE</b> and trades the paper account → if it loses, it is <b>retired</b>.
+        When too few are proven yet, the best new ones trade on <b>probation</b>.</p>
+      </div>
+      <div class="pipeline big" id="pipeline2"></div>
+      <div class="card">
+        <div class="card-head"><h2>Strategy pool</h2><span class="muted small" id="pool-note"></span></div>
+        <div class="table-wrap"><table><thead><tr><th>ID</th><th>Stage</th><th>Buy rules</th><th>History test</th><th>Live market test</th><th>Paper account</th></tr></thead><tbody id="pool-body"></tbody></table></div>
+        <div id="pool-empty" class="empty">Research is starting — the first strategies appear here in a few minutes.</div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h2>Recently retired</h2></div>
+        <div class="table-wrap"><table><thead><tr><th>ID</th><th>Why</th><th>Live market test</th><th>Retired</th></tr></thead><tbody id="retired-body"></tbody></table></div>
+        <div id="retired-empty" class="empty">None retired yet.</div>
       </div>
     </section>
 

@@ -12,17 +12,18 @@ It has a dashboard that opens in your browser.
 
 ## What it does (in simple words)
 
+TradBot never stops working. Three things run at the same time:
+
 | Part | What it does |
 |---|---|
-| **Data collector** | Downloads 1-hour candles for BTC/USDT and ETH/USDT from Binance (public data, no account needed). |
-| **Strategy Lab** | Invents ~300 strategy ideas per round, tests them on past data with fees, improves the best ones over 4 rounds (~1,000 strategies), then re-tests the winners on data they have **never seen**. Only strategies that make money there are used. Re-runs automatically every week. |
+| **Live scan (every 30 s)** | Gets live prices for **BTC, ETH, SOL, BNB, XRP and DOGE**, checks stop-loss and target of open trades, and shows for every live strategy **how many of its buy rules are met right now** and what it is still waiting for. |
+| **Non-stop research** | Round after round (about one per minute), it invents ~150 new strategies, evolves more from the best known ones, and tests them on 3 years of history with fees. Every strategy that also passes on history it never saw joins the **strategy pool**. |
+| **Live market test** | Every strategy in the pool (up to 300) is shadow-traded on the **new candles that appeared after it was discovered**, which is a real test on data it couldn't have seen. Every hour the results are updated. |
+| **Promotion / retirement** | Strategies that make money in the live market test are promoted to **LIVE** (up to 10) and trade the paper account. Strategies that lose are **retired**. Until enough are proven, the 3 best new ones trade on **probation**. |
+| **Trading decisions** | When each hourly candle closes, LIVE strategies decide to buy or not (same rules as the tests, so no peeking). The **risk manager** limits every trade: max 25% of the balance, max 3 open trades, stop-loss always, 5% daily loss stop, 20% kill switch. |
 | **ML model** | A LightGBM model estimates "chance the price rises in the next 12 hours". Strategies can require it to agree. |
-| **AI brain** (Gemini or Claude) | Suggests new strategy ideas, reviews every buy (it can **block** a trade, never force one) and writes a daily report. Optional. |
-| **Risk manager** | Max 25% of the balance per trade, max 3 open trades, a stop-loss on every trade, a 5% daily loss stop, and a 20% kill switch. Nothing can skip these rules. |
-| **Paper account** | Fake $10,000. Every trade pays realistic fees and slippage. Saved in a database, so nothing is lost if your PC turns off. |
-| **Dashboard** | Balance, open trades, chart with buy/sell markers, strategies explained in plain English, backtest, AI messages and settings. |
-
----
+| **AI brain** (Gemini or Claude) | Suggests strategy ideas every few research rounds, reviews every buy (it can **block** a trade, never force one) and writes a daily report. Optional. |
+| **Dashboard** | Heartbeat, research counters, live view of what the bot sees, live activity feed, balance, trades, the whole strategy pipeline, backtest and settings. |
 
 ## Install and run on Windows: ONE file does everything
 
@@ -145,7 +146,10 @@ Restart the bot after changing it. The most useful ones:
 | `risk.max_position_pct` | 25 | Max % of the balance per trade |
 | `risk.daily_loss_limit_pct` | 5 | Stop for the day after this loss |
 | `risk.kill_switch_drawdown_pct` | 20 | Stop everything after this drop from the peak |
-| `lab.population` / `lab.generations` | 300 / 4 | Lab size (smaller = faster on a weak PC) |
+| `scan_seconds` | 30 | How often the live scan runs |
+| `research.round_population` | 150 | New ideas per research round |
+| `research.pause_seconds` | 20 | Break between research rounds (bigger = cooler PC) |
+| `pool.max_live` | 10 | Max strategies trading the paper account |
 | `ml.threads` | 2 | CPU threads for the ML model |
 | `brain.provider` | gemini | `gemini`, `claude` or `none` |
 
@@ -160,11 +164,11 @@ Restart the bot after changing it. The most useful ones:
 | "Could not reach Binance" | Check your internet. The bot automatically tries Binance's backup data server. It retries every minute. |
 | Dashboard doesn't open | Open <http://127.0.0.1:8050> yourself. Make sure the black TradBot window is still open. |
 | "Port 8050 in use" | Another copy is running. Close it, or change `dashboard.port` in `config.yaml`. |
-| "No strategy passed the tests" | Normal in some markets. The bot doesn't trade, which is the safe choice. The Lab retries weekly, or click **Run Strategy Lab now**. |
+| No trades for a while | Normal: LIVE strategies only buy when all their rules are met. Watch **What the bot sees right now** to see how close each one is. |
 | Gemini "API key is not valid" | Copy the key again from aistudio.google.com, paste it in Settings, and click Save. |
 | Gemini "limit reached" | The free tier is used up for now. The bot keeps trading without the AI and retries later. |
 | Kill switch is ON | The balance fell 20% from its peak. Review the trades, then **Settings → Reset kill switch**. |
-| PC is slow during the Lab | Lower `lab.population` (e.g. 150) and `ml.threads` (1) in `config.yaml`. |
+| PC is slow | Research runs non-stop. In `config.yaml` raise `research.pause_seconds` (e.g. 120), lower `research.round_population` (e.g. 80) and `ml.threads` (1), or click **Pause research** on the Strategies page. |
 
 Logs are saved in `data/bot.log`. If you need help, share that file (it contains no keys).
 
@@ -189,7 +193,8 @@ tradbot/
   features.py        indicators (RSI, MACD, ATR, moving averages ...)
   strategy.py        strategy rules + the strategy inventor
   backtest.py        honest backtester (next-candle entry, fees, worst-case fills)
-  lab.py             Strategy Lab (invent, test, evolve, validate, choose)
+  lab.py             one research round (invent, test, evolve, validate)
+  pool.py            strategy pool: live market test, promotion, retirement
   ml.py              LightGBM model with walk-forward training
   brain.py           AI brain (Gemini / Claude)
   risk.py            risk manager

@@ -102,13 +102,14 @@ async function loadState() {
   let msg = "";
   if (acc.kill_switch) msg = "Kill switch is ON: the balance fell too far from its peak, so all new trades are stopped. Review what happened, then reset it in Settings.";
   else if (e.last_error) msg = "Problem: " + e.last_error + " — the bot retries automatically every minute.";
-  else if (!sm.active_strategies.length && !s.job.name) msg = "No strategy passed the tests yet, so the bot is not trading (that's the safe choice). The Strategy Lab re-researches every week, or run it now on the Strategies tab.";
+  else if (!sm.active_strategies.length) msg = "Research is running and looking for the first strategies that pass the tests. Trading starts as soon as the first ones go live (usually a few minutes after the first start).";
   banner.textContent = msg;
   banner.className = "banner" + (msg ? (acc.kill_switch || e.last_error ? "" : " info") : " hidden");
   const j = s.job;
   $("job").classList.toggle("hidden", !j.name);
   if (j.name) { $("job-name").textContent = j.name; $("job-msg").textContent = j.msg; $("job-bar").style.width = j.pct + "%"; }
-  $("btn-lab").disabled = $("btn-backtest").disabled = !!j.name;
+  $("btn-backtest").disabled = !!j.name;
+  renderLive(s);
 
   if (!state.symbols.length) {
     state.symbols = s.symbols; state.symbol = s.symbols[0];
@@ -185,39 +186,61 @@ async function loadCandles() {
   });
 }
 
-/* ------------------------------------------------------ strategies */
-function metricBox(title, m, honest) {
-  if (!m) return "";
-  return `<div class="metric ${honest ? "honest" : ""}"><h3>${title}</h3>
-    <div><span>Return</span><b class="${cls(m.return_pct)}">${pct(m.return_pct)}</b></div>
-    <div><span>Buy &amp; hold</span><span class="${cls(m.buy_hold_return_pct)}">${pct(m.buy_hold_return_pct, 1)}</span></div>
-    <div><span>Max drop</span><span>${m.max_dd_pct.toFixed(1)}%</span></div>
-    <div><span>Sharpe</span><span>${m.sharpe.toFixed(2)}</span></div>
-    <div><span>Trades / wins</span><span>${m.trades} / ${m.win_rate.toFixed(0)}%</span></div></div>`;
+/* ------------------------------------------------------------ live */
+function pipelineHTML(c) {
+  return [["Strategies tested", (c.tested_total || 0).toLocaleString()], ["Research rounds", c.rounds || 0],
+    ["In live market test", c.testing || 0], ["LIVE (trading)", c.live || 0], ["Retired", c.retired || 0]]
+    .map(([k, v]) => `<div><span>${k}</span><b>${v}</b></div>`).join("");
 }
+function renderLive(s) {
+  const e = s.engine, r = s.research, c = s.pool;
+  const fresh = e.last_scan && Date.now() / 1000 - e.last_scan < s.scan_seconds * 2 + 15;
+  $("pulse").className = "pulse" + (fresh ? " on" : "");
+  $("hb").textContent = fresh ? `Live · scanned ${ago(e.last_scan)}` : (e.last_scan ? `last scan ${ago(e.last_scan)}` : "starting…");
+  $("pipeline").innerHTML = pipelineHTML(c);
+  $("pipeline2").innerHTML = pipelineHTML(c);
+  $("research-state").textContent = r.paused ? "paused" : r.state === "waiting" ? "short break" : r.state;
+  $("research-msg").textContent = r.msg || "";
+  $("research-bar").style.width = (r.state === "running" ? r.pct : r.state === "waiting" ? 100 : 0) + "%";
+  $("btn-lab").textContent = r.paused ? "Resume research" : "Pause research";
+
+  $("radar-empty").classList.toggle("hidden", s.radar.length > 0);
+  $("radar-note").textContent = `every ${s.scan_seconds}s · buys are confirmed when the hourly candle closes`;
+  $("radar-body").innerHTML = s.radar.map((x) => {
+    const meter = x.rules.map((q) => `<i class="${q.ok ? "ok" : ""}" title="${esc(q.rule)}: now ${esc(q.now)}"></i>`).join("");
+    const miss = x.rules.find((q) => !q.ok);
+    const label = { signal: "BUY signal", holding: "holding", waiting: "waiting" }[x.status];
+    return `<tr><td><b>${esc(x.symbol)}</b></td><td>${price(x.price)} <span class="small ${cls(x.change_pct)}">${pct(x.change_pct, 1)}</span></td>
+      <td>${esc(x.strategy)}</td><td><span class="meter">${meter}</span>${x.met}/${x.total}</td>
+      <td class="wait">${miss ? esc(miss.rule) + " <span class=\"small\">(now " + esc(miss.now) + ")</span>" : "all rules met"}</td>
+      <td><span class="st ${x.status}">${label}</span></td></tr>`;
+  }).join("");
+  $("activity").innerHTML = s.activity.map((a) => `<li><time>${new Date(a.time * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</time>
+     <span class="tag ${esc(a.kind)}">${esc(a.kind)}</span><span>${esc(a.msg)}</span></li>`).join("") || '<li class="muted">starting…</li>';
+}
+
+/* ------------------------------------------------------ strategies */
+const fmtTest = (m) => m ? `<span class="${cls(m.return_pct)}">${pct(m.return_pct)}</span> <span class="muted small">· ${m.trades} trades · PF ${(m.profit_factor ?? 0).toFixed(2)}</span>` : "–";
 async function loadStrategies() {
   const d = await get("strategies");
-  const st = d.stats || {};
-  const ml = st.ml ? Object.entries(st.ml).map(([s, v]) => `${esc(s)} ${(v.auc ?? 0).toFixed(3)}`).join(", ") : "–";
-  $("lab-summary").innerHTML = d.updated ? `<div class="card-head"><h2>Last Strategy Lab run</h2><span class="muted small">${dt(d.updated)}</span></div>
-     <dl class="status"><dt>Strategies invented &amp; tested</dt><dd>${st.tested ?? "–"}</dd>
-     <dt>Ideas from the AI brain</dt><dd>${st.ai_ideas ?? 0}</dd>
-     <dt>Best candidates re-tested on unseen data</dt><dd>${st.passed_research ?? "–"}</dd>
-     <dt>Passed the unseen-data test</dt><dd>${st.passed_validation ?? "–"}</dd>
-     <dt>Chosen for paper trading</dt><dd>${st.chosen ?? 0}</dd>
-     <dt>ML model skill (AUC, 0.50 = coin flip)</dt><dd>${ml}</dd>
-     <dt>Time taken</dt><dd>${st.seconds ?? "–"} s</dd></dl>`
-    : '<div class="empty">The Strategy Lab has not run yet. It starts automatically on first launch.</div>';
-  $("strategy-list").innerHTML = (d.active || []).map((a) => {
-    const s = a.strategy, live = a.live;
-    return `<div class="card strategy"><div class="card-head"><h2>${esc(s.id)}<span class="badge">${esc(s.origin)}</span></h2>
-      <span class="muted small">added ${dt(a.added)}</span></div>
-      <div class="rules"><p>${esc(a.description.buy)}</p><p class="muted">${esc(a.description.sell)}</p></div>
-      <div class="metrics">${metricBox("Research", a.research)}${metricBox("Validation (unseen)", a.validation)}${metricBox("Final test (honest)", a.final, true)}
-      <div class="metric"><h3>Live paper trading</h3>${live ? `<div><span>Trades</span><span>${live.trades}</span></div>
-        <div><span>Profit</span><b class="${cls(live.pnl)}">${money(live.pnl)}</b></div><div><span>Win rate</span><span>${live.win_rate.toFixed(0)}%</span></div>
-        <div><span>Profit factor</span><span>${live.profit_factor.toFixed(2)}</span></div>` : '<div class="muted">no trades yet</div>'}</div></div></div>`;
+  $("pipeline2").innerHTML = pipelineHTML(d.counts);
+  const pool = d.pool || [];
+  $("pool-empty").classList.toggle("hidden", pool.length > 0);
+  $("pool-note").textContent = pool.length ? `${d.counts.live} live · ${d.counts.testing} in live market test (showing ${pool.length})` : "";
+  $("pool-body").innerHTML = pool.map((e) => {
+    const f = e.forward, live = e.live, st = e.stage === "live" ? (e.probation ? "probation" : "live") : "testing";
+    const label = { live: "LIVE", probation: "LIVE · probation", testing: "testing" }[st];
+    const fw = f && f.trades ? fmtTest(f) + `<div class="muted small">${f.hours} h of new candles</div>` : `<span class="muted small">no trades yet${f ? " · " + f.hours + " h" : ""}</span>`;
+    return `<tr><td><b>${esc(e.strategy.id)}</b><div class="muted small">${esc(e.strategy.origin)}</div></td>
+      <td><span class="st ${st}">${label}</span></td>
+      <td class="rules-cell">${esc(e.description.buy || "")}</td>
+      <td>${fmtTest(e.validation)}<div class="muted small">final test ${pct(e.final?.return_pct)}</div></td>
+      <td>${fw}</td>
+      <td>${live ? `<span class="${cls(live.pnl)}">${money(live.pnl)}</span> <span class="muted small">${live.trades} trades</span>` : '<span class="muted small">–</span>'}</td></tr>`;
   }).join("");
+  const ret = d.retired || [];
+  $("retired-empty").classList.toggle("hidden", ret.length > 0);
+  $("retired-body").innerHTML = ret.map((e) => `<tr><td>${esc(e.strategy.id)}</td><td>${esc(e.why)}</td><td>${fmtTest(e.forward)}</td><td>${dt(e.retired)}</td></tr>`).join("");
 }
 
 /* ---------------------------------------------------------- trades */
@@ -264,7 +287,7 @@ async function loadLog() {
 
 /* --------------------------------------------------------- actions */
 $("btn-pause").addEventListener("click", async () => { await post(state.last?.account.paused ? "resume" : "pause"); loadState(); });
-$("btn-lab").addEventListener("click", async () => { const r = await post("lab"); toast(r.ok ? "Strategy Lab started — watch the progress bar." : "Another job is already running."); loadState(); });
+$("btn-lab").addEventListener("click", async () => { const r = await post("research-toggle"); toast(r.paused ? "Research paused." : "Research resumed."); loadState(); });
 $("btn-backtest").addEventListener("click", async () => { const r = await post("backtest"); toast(r.ok ? "Backtest started." : "Another job is already running."); loadState(); });
 $("btn-reset-kill").addEventListener("click", async () => { if (confirm("Reset the kill switch and allow trading again?")) { await post("reset-kill"); toast("Kill switch reset."); loadState(); } });
 $("btn-reset-account").addEventListener("click", async () => {
@@ -308,7 +331,7 @@ setInterval(() => {
   if (document.hidden) return;              // no work while you look elsewhere
   ticks++;
   const jobRunning = state.last?.job?.name;
-  if (jobRunning || ticks % 3 === 0) loadState().catch(() => ($("conn").textContent = "bot not reachable — is it running?"));
+  if (jobRunning || ticks % 1 === 0) loadState().catch(() => ($("conn").textContent = "bot not reachable — is it running?"));
   if (ticks % 6 === 0 || state.tab === "log") refreshTab();
 }, 5000);
 document.addEventListener("visibilitychange", () => { if (!document.hidden) refreshAll(); });

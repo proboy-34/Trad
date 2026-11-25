@@ -18,7 +18,7 @@ from . import data
 from .brain import Brain
 from .config import save_env_value
 from .engine import BACKTEST_FILE, Engine
-from .lab import LAB_HISTORY_FILE, load_active
+from .lab import load_active
 from .log import RECENT, get_logger
 
 log = get_logger("dashboard")
@@ -53,6 +53,11 @@ class API:
             "summary": summary, "account": acc, "positions": positions,
             "drawdown_pct": max(0.0, (1 - summary["equity"] / peak) * 100),
             "engine": e.state, "job": e.job, "brain": e.brain.status(),
+            "research": e.research, "pool": e.pool.counts(),
+            "radar": sorted(e.radar, key=lambda r: (r["status"] != "holding",
+                                                    r["status"] != "signal",
+                                                    -r["met"] / max(1, r["total"])))[:10],
+            "activity": list(e.activity)[-60:][::-1], "scan_seconds": e.scan_sec,
             "risk": e.cfg["risk"], "symbols": e.cfg["symbols"], "timeframe": e.tf,
             "server_time": time.time(),
         }
@@ -71,12 +76,16 @@ class API:
         return {"lines": list(RECENT)[-200:]}
 
     def strategies(self, q):
-        d = load_active()
         stats = self.e.account.strategy_stats()
-        for a in d.get("active", []):
+        order = {"live": 0, "new": 1}
+        pool = sorted(self.e.pool.entries(), key=lambda x: (
+            order.get(x.get("stage"), 2), -((x.get("forward") or {}).get("return_pct") or 0)))
+        for a in pool:
             a["live"] = stats.get(a["strategy"]["id"])
-        d["history"] = _read_json(LAB_HISTORY_FILE, [])[-10:]
-        return d
+        d = load_active()
+        return {"pool": pool[:60], "retired": d.get("retired", [])[-30:][::-1],
+                "counts": self.e.pool.counts(), "research": self.e.research,
+                "last_round": d.get("stats", {})}
 
     def backtest(self, q):
         return _read_json(BACKTEST_FILE, {"strategies": []})
@@ -103,8 +112,10 @@ class API:
     # ------------------------------------------------------------ POST
     def post(self, action: str, body: dict):
         e = self.e
-        if action == "lab":
-            return {"ok": e.run_lab_job(), "msg": "Strategy Lab started" if not e.job["name"] else ""}
+        if action == "research-toggle":
+            e.research["paused"] = not e.research["paused"]
+            e.act("Research " + ("paused" if e.research["paused"] else "resumed") + " by you.", "system")
+            return {"ok": True, "paused": e.research["paused"]}
         if action == "backtest":
             return {"ok": e.run_backtest_job()}
         if action == "pause":

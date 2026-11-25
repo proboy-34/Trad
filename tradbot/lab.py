@@ -93,13 +93,13 @@ class Lab:
             "return_pct": float(np.mean([m["return_pct"] for m in ms])),
             "max_dd_pct": float(max(m["max_dd_pct"] for m in ms)),
             "sharpe": float(np.mean([m["sharpe"] for m in ms])),
-            "min_sharpe": float(min(m["sharpe"] for m in ms)),
+            "low_sharpe": float(np.percentile([m["sharpe"] for m in ms], 25)),
             "win_rate": float(np.mean([m["win_rate"] for m in ms])),
             "profit_factor": float(np.mean([min(m["profit_factor"], 5) for m in ms])),
             "buy_hold_return_pct": float(np.mean([m["buy_hold_return_pct"] for m in ms])),
             "buy_hold_sharpe": float(np.mean([m["buy_hold_sharpe"] for m in ms])),
             "buy_hold_max_dd_pct": float(max(m["buy_hold_max_dd_pct"] for m in ms)),
-            "min_window_sharpe": float(min(chunk_sharpes)) if chunk_sharpes else 0.0,
+            "low_window_sharpe": float(np.percentile(chunk_sharpes, 25)) if chunk_sharpes else 0.0,
             "per_symbol": per_symbol,
         }
         self.cache[key] = agg
@@ -112,9 +112,9 @@ class Lab:
             return -99.0
         if m["profit_factor"] < 1.0:
             return -50.0 + m["profit_factor"]
-        # reward risk-adjusted profit that works on EVERY coin and in EVERY
-        # market window, not just one lucky period
-        return 0.4 * m["sharpe"] + 0.3 * m["min_sharpe"] + 0.3 * m["min_window_sharpe"]
+        # reward risk-adjusted profit that works on (nearly) EVERY coin and in
+        # EVERY market window, not just one lucky period
+        return 0.4 * m["sharpe"] + 0.3 * m["low_sharpe"] + 0.3 * m["low_window_sharpe"]
 
     def _min_trades(self, period: str) -> int:
         base = self.lc["min_trades"]
@@ -123,110 +123,108 @@ class Lab:
         return max(5, int(base * frac / self.lc["split"][0]))
 
     # ---------------------------------------------------------------- run
-    def run(self) -> dict:
+    def run(self, probs: dict | None = None, seeds: list[dict] | None = None,
+            population: int | None = None, generations: int | None = None,
+            train_ml: bool = True, ai_ideas: bool = True) -> dict:
+        """One research round. Returns every strategy that passed the
+        unseen-data test (near-copies removed). The StrategyPool decides
+        what happens to them next (live market test, promotion, retirement)."""
         t0 = time.time()
         use_ml = bool(self.cfg["ml"]["enabled"] and ml.HAVE_LGB)
         ml_report = {}
         if use_ml:
-            self.progress(2, "Training ML model (walk-forward, no peeking)...")
+            if probs:
+                self.probs.update(probs)
+            else:
+                self.progress(2, "Training ML model (walk-forward, no peeking)...")
+                for sym, feats in self.datasets.items():
+                    self.probs[sym] = ml.walk_forward_probs(
+                        feats, self.cfg["ml"]["horizon_bars"], self.cfg["ml"]["target_pct"],
+                        threads=self.cfg["ml"]["threads"])
             for sym, feats in self.datasets.items():
-                p = ml.walk_forward_probs(feats, self.cfg["ml"]["horizon_bars"],
-                                          self.cfg["ml"]["target_pct"], threads=self.cfg["ml"]["threads"])
-                self.probs[sym] = p
                 y = ml.make_labels(feats, self.cfg["ml"]["horizon_bars"], self.cfg["ml"]["target_pct"])
-                ml_report[sym] = {"auc": ml.auc(y, p)}
-                log.info("ML model %s: AUC %.3f (0.50 = coin flip)", sym, ml_report[sym]["auc"])
+                ml_report[sym] = {"auc": ml.auc(y, self.probs[sym])}
 
         # generator uses indicator levels from the RESEARCH period only
         research_parts = [df.iloc[WARMUP_BARS:self.splits[s][0]] for s, df in self.datasets.items()]
         gen = StrategyGenerator(pd.concat(research_parts), seed=self.seed, use_ml=use_ml)
+        pop_size = int(population or self.lc["population"])
+        gens = max(1, int(generations or self.lc["generations"]))
 
-        population: list[Strategy] = [gen.random() for _ in range(self.lc["population"])]
-        old = load_active().get("active", [])
-        population += [Strategy.from_dict(x["strategy"]) for x in old]
+        # new random ideas + the best known strategies (to evolve new ones from them)
+        seed_list = [Strategy.from_dict(x["strategy"]) for x in (seeds or [])]
+        pop: list[Strategy] = [gen.random() for _ in range(pop_size)] + seed_list
         ai_count = 0
-        if self.brain is not None and self.cfg["brain"].get("suggest_strategies"):
+        if ai_ideas and self.brain is not None and self.cfg["brain"].get("suggest_strategies"):
             self.progress(5, "Asking the AI brain for strategy ideas...")
             try:
-                ideas = self.brain.suggest_strategies(old, gen.levels)
-                population += ideas
+                ideas = self.brain.suggest_strategies(seeds or [], gen.levels)
+                pop += ideas
                 ai_count = len(ideas)
-                log.info("AI brain suggested %d valid strategies", ai_count)
             except Exception as e:
                 log.warning("AI brain ideas skipped: %s", e)
 
         min_tr = self._min_trades("research")
-        gens = max(1, int(self.lc["generations"]))
         batch = max(10, int(self.lc["batch_size"]))
         scored: dict[str, tuple[float, Strategy]] = {}
         for g in range(gens):
-            for k in range(0, len(population), batch):
-                for s in population[k:k + batch]:
+            for k in range(0, len(pop), batch):
+                for s in pop[k:k + batch]:
                     if s.id not in scored:
                         scored[s.id] = (self._fitness(self._eval(s, "research"), min_tr), s)
-                pct = 8 + 70 * (g + min(1.0, (k + batch) / len(population))) / gens
-                self.progress(pct, f"Round {g + 1}/{gens}: tested {self.tested} strategies")
+                pct = 8 + 70 * (g + min(1.0, (k + batch) / len(pop))) / gens
+                self.progress(pct, f"Generation {g + 1}/{gens}: tested {self.tested} strategies")
             ranked = sorted(scored.values(), key=lambda x: -x[0])
             elite = [s for f, s in ranked[: max(5, len(ranked) // 10)] if f > -50]
             if g == gens - 1 or not elite:
                 break
-            population = []
-            while len(population) < self.lc["population"]:
+            pop = []
+            while len(pop) < pop_size:
                 r = gen.rng.random()
                 if r < 0.6:
-                    population.append(gen.mutate(gen.rng.choice(elite)))
+                    pop.append(gen.mutate(gen.rng.choice(elite)))
                 elif r < 0.85 and len(elite) > 1:
                     a, b = gen.rng.sample(elite, 2)
-                    population.append(gen.crossover(a, b))
+                    pop.append(gen.crossover(a, b))
                 else:
-                    population.append(gen.random())
+                    pop.append(gen.random())
 
         # ---------------------------------------------------- validation
         self.progress(82, "Re-testing the best on unseen data...")
         ranked = sorted(scored.values(), key=lambda x: -x[0])
-        candidates = [s for f, s in ranked[:40] if f > 0]
+        candidates = [s for f, s in ranked[:60] if f > 0]
         val_min = self._min_trades("validation")
         passed = []
         for s in candidates:
             v = self._eval(s, "validation")
-            ok = passes_unseen_test(v, val_min, self.lc["max_drawdown_pct"])
-            if ok:
+            if passes_unseen_test(v, val_min, self.lc["max_drawdown_pct"]):
                 rs = self._eval(s, "research")
                 passed.append((min(rs["sharpe"], v["sharpe"]), s))
         passed.sort(key=lambda x: -x[0])
 
-        # pick diverse winners (don't pick 3 near-copies of one idea)
-        chosen: list[Strategy] = []
+        # drop near-copies (strategies that buy at almost the same moments)
+        kept: list[Strategy] = []
         signals = {}
         ref_sym = next(iter(self.datasets))
         ref = self.datasets[ref_sym]
         for _, s in passed:
             sig = s.entry_signal(ref, self.probs[ref_sym])
-            too_similar = False
-            for other in chosen:
-                o = signals[other.id]
-                union = (sig | o).sum()
-                if union and (sig & o).sum() / union > 0.5:
-                    too_similar = True
-                    break
-            if not too_similar:
-                chosen.append(s)
-                signals[s.id] = sig
-            if len(chosen) >= self.lc["keep_top"]:
-                break
+            if any(((sig & signals[o.id]).sum() / max(1, (sig | signals[o.id]).sum())) > 0.7
+                   for o in kept):
+                continue
+            kept.append(s)
+            signals[s.id] = sig
 
-        self.progress(92, "Final honest test + training live ML model...")
-        active = []
-        for s in chosen:
-            active.append({
-                "strategy": s.to_dict(),
-                "description": s.describe(),
-                "research": _strip(self._eval(s, "research")),
-                "validation": _strip(self._eval(s, "validation")),
-                "final": _strip(self._eval(s, "final")),
-                "added": time.time(),
-            })
-        if use_ml:
+        self.progress(92, "Final honest test...")
+        entries = [{
+            "strategy": s.to_dict(),
+            "description": s.describe(),
+            "research": _strip(self._eval(s, "research")),
+            "validation": _strip(self._eval(s, "validation")),
+            "final": _strip(self._eval(s, "final")),
+            "added": time.time(),
+        } for s in kept]
+        if use_ml and train_ml:
             for sym, feats in self.datasets.items():
                 ml.train_final(feats, sym, self.cfg["ml"]["horizon_bars"],
                                self.cfg["ml"]["target_pct"], self.cfg["ml"]["threads"])
@@ -234,21 +232,13 @@ class Lab:
         stats = {
             "tested": self.tested, "ai_ideas": ai_count,
             "passed_research": len(candidates), "passed_validation": len(passed),
-            "chosen": len(active), "seconds": round(time.time() - t0, 1),
+            "new_candidates": len(entries), "seconds": round(time.time() - t0, 1),
             "ml": ml_report,
-            "periods": {sym: {
-                "research": [int(df["time"].iat[WARMUP_BARS]), int(df["time"].iat[self.splits[sym][0] - 1])],
-                "validation": [int(df["time"].iat[self.splits[sym][0]]), int(df["time"].iat[self.splits[sym][1] - 1])],
-                "final": [int(df["time"].iat[self.splits[sym][1]]), int(df["time"].iat[-1])],
-            } for sym, df in self.datasets.items()},
         }
-        result = {"updated": time.time(), "active": active, "stats": stats}
-        save_active(result)
-        _append_history(stats)
-        self.progress(100, f"Done: tested {self.tested}, {len(passed)} passed, {len(active)} chosen")
-        log.info("Strategy Lab finished in %.0fs: tested %d, passed validation %d, chosen %d",
-                 stats["seconds"], self.tested, len(passed), len(active))
-        return result
+        self.progress(100, f"Round done: tested {self.tested}, {len(passed)} passed")
+        log.info("Research round finished in %.0fs: tested %d, passed unseen test %d",
+                 stats["seconds"], self.tested, len(passed))
+        return {"passed": entries, "stats": stats, "probs": self.probs}
 
 
 def passes_unseen_test(v: dict, min_trades: int, max_dd: float) -> bool:

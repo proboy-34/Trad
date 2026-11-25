@@ -1,13 +1,15 @@
 """The Engine - runs the whole bot by itself, 24/7.
 
- every minute : check stop-loss / take-profit of open trades (live price)
+ every 30 s   : live scan - prices, stop-loss / take-profit, and how close
+                every strategy is to buying (shown live on the dashboard)
  every hour   : when a candle closes -> exits, then new buy decisions
  every day    : AI daily report
- every week   : Strategy Lab re-research + ML retrain (auto_run_weekday)
+ every 6 h    : Strategy Lab re-research + ML retrain (lab.auto_every_hours)
  first start  : downloads history and runs the Strategy Lab automatically
 """
 from __future__ import annotations
 
+import collections
 import json
 import threading
 import time
@@ -19,7 +21,8 @@ from . import backtest, data, ml
 from .brain import Brain
 from .config import DATA_DIR
 from .features import WARMUP_BARS, compute_features, fmt_value
-from .lab import Lab, load_active, save_active
+from .lab import Lab, load_active
+from .pool import StrategyPool
 from .log import get_logger
 from .paper import PaperAccount, utc_day
 from .risk import RiskManager
@@ -103,7 +106,17 @@ class Engine:
         self._stop = threading.Event()
         self._job_lock = threading.Lock()
         self._last_report_day = None
-        self._last_lab_check_day = None
+        self.pool = StrategyPool(cfg, self.account)
+        self.research = {"state": "starting", "paused": False, "round": 0, "pct": 0,
+                         "msg": "starting...", "last": {}}
+        self.scan_sec = int(cfg.get("scan_seconds", 30))
+        self.radar: list[dict] = []          # what every strategy sees right now
+        self.activity = collections.deque(maxlen=300)   # live feed for the dashboard
+        self.state["last_scan"] = None
+
+    def act(self, msg: str, kind: str = "scan"):
+        """Adds a line to the live activity feed (memory only, not the log file)."""
+        self.activity.append({"time": time.time(), "kind": kind, "msg": msg})
 
     # ------------------------------------------------------------ jobs
     def start_job(self, name: str, fn) -> bool:
@@ -129,19 +142,88 @@ class Engine:
         threading.Thread(target=runner, daemon=True, name=name).start()
         return True
 
-    def run_lab_job(self) -> bool:
-        def work(progress):
-            progress(1, "Downloading latest price history...")
-            datasets = load_datasets(self.cfg)
-            brain = self.brain if self.brain.available() else None
-            res = Lab(self.cfg, datasets, brain=brain, progress=progress).run()
-            self.models = {s: ml.load_model(s) for s in self.cfg["symbols"]}
-            st = res["stats"]
-            self.account.message(
-                "lab", f"Strategy Lab tested {st['tested']} strategies: {st['passed_validation']} "
-                       f"passed the unseen-data test, {st['chosen']} now paper trading.")
-            run_backtest(self.cfg, datasets)
-        return self.start_job("Strategy Lab", work)
+    # -------------------------------------------------- research worker
+    def _research_loop(self):
+        """Never stops: refresh data -> live market test of every strategy ->
+        promote / retire -> invent + test a new round -> repeat."""
+        rc = self.cfg["research"]
+        use_ml = bool(self.cfg["ml"]["enabled"] and ml.HAVE_LGB)
+        datasets, probs = None, {}
+        last_refresh = last_train = 0.0
+        while not self._stop.is_set():
+            if self.research["paused"]:
+                self.research.update(state="paused", msg="Research paused by you")
+                self._stop.wait(3)
+                continue
+            try:
+                if datasets is None or time.time() - last_refresh > rc["refresh_minutes"] * 60:
+                    self.research.update(state="running", pct=2,
+                                         msg="Downloading latest prices for all coins...")
+                    datasets = load_datasets(self.cfg)
+                    if use_ml:
+                        for i, (sym, f) in enumerate(datasets.items()):
+                            self.research.update(msg=f"ML model learning {sym} (walk-forward)...",
+                                                 pct=5 + 40 * i / len(datasets))
+                            probs[sym] = ml.walk_forward_probs(
+                                f, self.cfg["ml"]["horizon_bars"], self.cfg["ml"]["target_pct"],
+                                threads=self.cfg["ml"]["threads"])
+                        if time.time() - last_train > 6 * 3600 or not all(self.models.values()):
+                            for sym, f in datasets.items():
+                                ml.train_final(f, sym, self.cfg["ml"]["horizon_bars"],
+                                               self.cfg["ml"]["target_pct"], self.cfg["ml"]["threads"])
+                            self.models = {s: ml.load_model(s) for s in self.cfg["symbols"]}
+                            last_train = time.time()
+                    last_refresh = time.time()
+                    self.research.update(msg="Live market test of every strategy in the pool...")
+                    self.pool.forward_test(datasets, probs, self.tf)
+                    self._review_pool()
+                    c = self.pool.counts()
+                    self.act(f"Live market test updated: {c['testing']} strategies testing, "
+                             f"{c['live']} live, {c['retired']} retired.", "lab")
+
+                self.research["round"] += 1
+                n = self.research["round"]
+                ai = (self.brain.available() and rc["ai_ideas_every_rounds"] > 0
+                      and n % rc["ai_ideas_every_rounds"] == 1)
+
+                def progress(pct, msg, n=n):
+                    self.research.update(state="running", pct=round(pct, 1),
+                                         msg=f"Round {n}: {msg}")
+
+                res = Lab(self.cfg, datasets, brain=self.brain if ai else None,
+                          progress=progress).run(
+                    probs=probs, seeds=self.pool.seeds(20),
+                    population=rc["round_population"], generations=rc["round_generations"],
+                    train_ml=False, ai_ideas=ai)
+                new = self.pool.add_round(res)
+                self._review_pool()
+                st, c = res["stats"], self.pool.counts()
+                self.research.update(last=st, pct=100,
+                                     msg=f"Round {n} done: {st['tested']} tested, {new} new")
+                self.act(f"Research round {n}: invented & tested {st['tested']} strategies"
+                         + (f" (+{st['ai_ideas']} AI ideas)" if st.get("ai_ideas") else "")
+                         + f" -> {st['passed_validation']} passed the unseen test, {new} NEW added to "
+                         f"the live market test. Pool: {c['testing']} testing, {c['live']} live.", "lab")
+                if new:
+                    self.account.message("lab", f"Research round {n}: {new} new strategies "
+                                                "entered the live market test.")
+            except data.DataError as e:
+                self.research.update(state="waiting", msg=f"No internet / Binance: {e}")
+                self._stop.wait(60)
+                continue
+            except Exception as e:
+                self.research.update(state="error", msg=f"{type(e).__name__}: {e}")
+                log.error("Research error: %s\n%s", e, traceback.format_exc())
+                self._stop.wait(60)
+                continue
+            self.research.update(state="waiting",
+                                 msg=f"Short break ({rc['pause_seconds']}s) so your PC stays fast...")
+            self._stop.wait(rc["pause_seconds"])
+
+    def _review_pool(self):
+        for m in self.pool.review(self.account.strategy_stats()):
+            self.account.message("lab", m)
+            self.act(m, "lab")
 
     def run_backtest_job(self) -> bool:
         return self.start_job("Backtest", lambda p: run_backtest(self.cfg, progress=p))
@@ -150,6 +232,8 @@ class Engine:
     def start(self):
         self.state["running"] = True
         threading.Thread(target=self._loop, daemon=True, name="engine").start()
+        if self.cfg["research"].get("enabled", True):
+            threading.Thread(target=self._research_loop, daemon=True, name="research").start()
 
     def stop(self):
         self._stop.set()
@@ -157,11 +241,11 @@ class Engine:
 
     def _loop(self):
         log.info("Engine started (paper trading). Press Ctrl+C to stop.")
-        if not load_active().get("active") and not load_active().get("updated"):
-            log.info("First start: running the Strategy Lab to find strategies...")
-            self.account.message("system", "First start: researching strategies (takes a few minutes).")
-            self.run_lab_job()
+        if not self.pool.entries():
+            self.account.message("system", "First start: researching strategies "
+                                           "(the first ones go live in a few minutes).")
         next_hourly = 0.0
+        self.act(f"Bot started. Scanning the market every {self.scan_sec} seconds.", "system")
         while not self._stop.is_set():
             now = time.time()
             try:
@@ -169,40 +253,80 @@ class Engine:
                     self.hourly_cycle()
                     next_hourly = (now // self.tf_sec + 1) * self.tf_sec + 20   # 20s after close
                     self.state["next_hourly"] = next_hourly
-                else:
-                    self.fast_check()
+                self.scan()
                 self._scheduled_tasks()
                 self.state["last_error"] = ""
             except data.DataError as e:
                 self.state["last_error"] = str(e)
-                log.warning("%s (will retry in 1 minute)", e)
+                self.act(f"Internet/Binance problem: {e} - retrying.", "error")
+                log.warning("%s (will retry)", e)
             except Exception as e:
                 self.state["last_error"] = f"{type(e).__name__}: {e}"
+                self.act(f"Error: {e} - retrying.", "error")
                 log.error("Engine error: %s\n%s", e, traceback.format_exc())
-            self._stop.wait(60)
+            self._stop.wait(self.scan_sec)
 
     def _scheduled_tasks(self):
         t = time.gmtime()
         today = utc_day()
-        lc = self.cfg["lab"]
-        if (t.tm_wday == lc["auto_run_weekday"] and t.tm_hour == lc["auto_run_hour_utc"]
-                and self._last_lab_check_day != today):
-            self._last_lab_check_day = today
-            updated = load_active().get("updated") or 0
-            if time.time() - updated > 5 * 86400:
-                log.info("Weekly Strategy Lab re-research starting")
-                self.run_lab_job()
         if (self.cfg["brain"].get("daily_report") and t.tm_hour == 0 and t.tm_min >= 5
                 and self._last_report_day != today and self.brain.available()):
             self._last_report_day = today
             self.brain.daily_report(self.summary())
 
     # ----------------------------------------------------- fast checks
+    def scan(self):
+        """Every few seconds: live prices, stop-loss/take-profit checks, and a
+        preview of how close every strategy is to buying. (Real buy decisions
+        still happen only when a candle CLOSES - exactly like the backtest.)"""
+        strategies = [Strategy.from_dict(a["strategy"]) for a in load_active().get("active", [])]
+        positions = self.account.positions()
+        radar = []
+        for sym in self.cfg["symbols"]:
+            df = data.fetch_recent(sym, self.tf, 300, include_open=True)
+            if len(df) < WARMUP_BARS + 5:
+                continue
+            price = float(df["close"].iat[-1])
+            self.prices[sym] = price
+            feats = compute_features(df)
+            row = feats.iloc[-1]
+            prob = ml.predict_latest(self.models.get(sym), feats.tail(1))[-1]
+            change = (price / float(df["open"].iat[-1]) - 1) * 100
+            holding = {p["strategy_id"] for p in positions if p["symbol"] == sym}
+            for st in strategies:
+                chk = st.check(row, None if prob != prob else float(prob))
+                status = ("holding" if st.id in holding else
+                          "signal" if chk["signal"] else "waiting")
+                radar.append({"symbol": sym, "price": price, "change_pct": change,
+                              "strategy": st.id, "status": status, **chk})
+        self.radar = radar
+        self.fast_check()
+        self.state["last_scan"] = time.time()
+        # one readable line for the activity feed
+        if not strategies:
+            self.act(f"Scanned {len(self.cfg['symbols'])} coins - no active strategies yet "
+                     "(Strategy Lab will find some).")
+        elif radar:
+            best = max(radar, key=lambda r: (r["status"] == "signal", r["met"] / max(1, r["total"])))
+            sig = [r for r in radar if r["status"] == "signal"]
+            missing = next((r["rule"] for r in best["rules"] if not r["ok"]), "")
+            line = (f"Scanned {len(self.cfg['symbols'])} coins x {len(strategies)} strategies. ")
+            if sig:
+                line += (f"{len(sig)} BUY signal(s) forming: "
+                         + ", ".join(f"{r['symbol']} ({r['strategy']})" for r in sig[:3])
+                         + " - confirms when this candle closes.")
+            else:
+                line += (f"Closest: {best['symbol']} {best['strategy']} "
+                         f"{best['met']}/{best['total']} rules"
+                         + (f", waiting for: {missing}" if missing else "") + ".")
+            if positions:
+                line += f" Watching stop-loss/target on {len(positions)} open trade(s)."
+            self.act(line)
+
     def fast_check(self):
-        """Every minute: stop-loss / take-profit using the live price."""
+        """Stop-loss / take-profit using the latest live prices."""
         for p in self.account.positions():
-            price = data.fetch_price(p["symbol"])
-            self.prices[p["symbol"]] = price
+            price = self.prices.get(p["symbol"]) or data.fetch_price(p["symbol"])
             if price <= p["stop"]:
                 self._close(p, min(price, p["stop"]), "stop-loss")
             elif price >= p["take"]:
@@ -232,6 +356,8 @@ class Engine:
         self.account.record_equity(eq)
         self._monitor()
         self.state["last_hourly"] = time.time()
+        self.act(f"Candle closed - decision time: checked {len(self.cfg['symbols'])} coins with "
+                 f"{len(strategies)} strategies. Balance ${eq:,.2f}.", "decision")
 
     def _exits(self, sym, feats, price):
         now = time.time()
@@ -266,6 +392,7 @@ class Engine:
             ok, why, size = self.risk.can_open(eq, sym, s.id)
             if not ok:
                 log.info("%s %s signal skipped: %s", sym, s.id, why)
+                self.act(f"{sym} {s.id}: buy signal, but skipped - {why}.", "decision")
                 continue
             atr = float(last["atr_pct"].iat[0])
             facts = {c.feature: fmt_value(c.feature, float(last[c.feature].iat[0])) for c in s.entry}
@@ -282,6 +409,7 @@ class Engine:
                 approve, reason = self.brain.review_trade(ctx)
                 if not approve:
                     self.account.message("trade", f"AI BLOCKED buy {sym} ({s.id}): {reason}")
+                    self.act(f"{sym} {s.id}: AI blocked the buy - {reason}", "ai")
                     continue
                 if reason:
                     note += f"; AI: {reason}"
@@ -293,6 +421,7 @@ class Engine:
                    f"Stop {stop:,.2f}, target {take:,.2f}")
             log.info(msg)
             self.account.message("trade", msg)
+            self.act(msg, "trade")
 
     def _close(self, p, price, reason):
         t = self.account.close_position(p["id"], price, reason)
@@ -301,25 +430,12 @@ class Engine:
                    f"{'PROFIT' if t['pnl'] > 0 else 'LOSS'} ${abs(t['pnl']):,.2f}")
             log.info(msg)
             self.account.message("trade", msg)
+            self.act(msg, "trade")
             self.account.record_equity(self.account.equity(self.prices))
 
     def _monitor(self):
-        """Retire strategies that fail in live paper trading."""
-        mc = self.cfg["monitor"]
-        data_ = load_active()
-        stats = self.account.strategy_stats()
-        keep = []
-        for a in data_.get("active", []):
-            st = stats.get(a["strategy"]["id"])
-            if (st and st["trades"] >= mc["retire_after_trades"]
-                    and st["profit_factor"] < mc["retire_if_profit_factor_below"]):
-                self.account.message("lab", f"Retired strategy {a['strategy']['id']}: profit factor "
-                                            f"{st['profit_factor']:.2f} after {st['trades']} paper trades.")
-                continue
-            keep.append(a)
-        if len(keep) != len(data_.get("active", [])):
-            data_["active"] = keep
-            save_active(data_)
+        """Retire strategies that lose in the paper account (via the pool)."""
+        self._review_pool()
 
     # ------------------------------------------------------------ views
     def summary(self) -> dict:

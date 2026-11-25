@@ -88,6 +88,24 @@ class Strategy:
                 sig &= (col < c.value) if c.op == "<" else (col > c.value)
         return sig
 
+    def check(self, row, prob: float | None = None) -> dict:
+        """Which buy rules are met on one candle (for the live dashboard)."""
+        rules = []
+        for c in self.entry:
+            v = row[c.feature]
+            ok = bool(v == v and ((v < c.value) if c.op == "<" else (v > c.value)))
+            label = FEATURES.get(c.feature, (c.feature, ""))[0].split(" - ")[0].split(" (")[0]
+            rules.append({"rule": f"{label} {'below' if c.op == '<' else 'above'} "
+                                  f"{fmt_value(c.feature, c.value)}",
+                          "now": fmt_value(c.feature, float(v)) if v == v else "n/a", "ok": ok})
+        if self.ml_min_prob is not None:
+            ok = prob is not None and prob == prob and prob >= self.ml_min_prob
+            rules.append({"rule": f"ML chance of rising at least {self.ml_min_prob:.0%}",
+                          "now": f"{prob:.0%}" if prob is not None and prob == prob else "n/a",
+                          "ok": bool(ok)})
+        met = sum(r["ok"] for r in rules)
+        return {"rules": rules, "met": met, "total": len(rules), "signal": met == len(rules)}
+
     def describe(self) -> dict:
         buy = " AND ".join(c.describe() for c in self.entry)
         if self.ml_min_prob is not None:
