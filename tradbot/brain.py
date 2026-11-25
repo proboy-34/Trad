@@ -68,6 +68,7 @@ class Brain:
         self._gemini_confirmed = False
         self._candidates: list[str] | None = None
         self._claude = None
+        self.lessons: list[str] = []          # what the bot learned from its own trades
 
     # ----------------------------------------------------------- status
     def key(self) -> str:
@@ -228,6 +229,7 @@ Available indicators (use the exact names, thresholds inside the typical range):
 {feats}
 
 Strategies currently in use (try different ideas): {current}
+What the bot learned from its own recent trades: {self.lessons or "no trades yet"}
 
 Answer ONLY with a JSON array. Each item:
 {{"entry": [{{"feature": "<name>", "op": "<" or ">", "value": <number>}}, ...1-3 items],
@@ -266,8 +268,13 @@ Answer ONLY with JSON: {{"decision": "approve" or "block", "reason": "<one short
         return decision != "block", reason
 
     def daily_report(self, summary: dict) -> str | None:
-        prompt = f"""Write today's short report (max 150 words) for the bot owner, who is a beginner.
-Explain what happened, why, and whether anything needs attention. Data:
+        prompt = f"""You are the bot's coach. Write today's short review (max 180 words) for the owner,
+a beginner, with 3 parts:
+1. What happened today (trades, balance, news).
+2. Mistakes: what went wrong and why (use the lessons and the trade list).
+3. What the bot will do differently / what to watch (the bot already cuts trade size on
+   losing coins/strategies and retires strategies that lose in the live market test).
+Never invent numbers. Data:
 {json.dumps(summary, default=str)}"""
         text = self.ask(prompt, max_tokens=1500)
         if text:

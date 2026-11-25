@@ -110,6 +110,7 @@ async function loadState() {
   if (j.name) { $("job-name").textContent = j.name; $("job-msg").textContent = j.msg; $("job-bar").style.width = j.pct + "%"; }
   $("btn-backtest").disabled = !!j.name;
   renderLive(s);
+  if (state.tab === "live") renderLivePage(s);
 
   if (!state.symbols.length) {
     state.symbols = s.symbols; state.symbol = s.symbols[0];
@@ -195,7 +196,7 @@ function pipelineHTML(c) {
 function renderLive(s) {
   const e = s.engine, r = s.research, c = s.pool;
   const fresh = e.last_scan && Date.now() / 1000 - e.last_scan < s.scan_seconds * 2 + 15;
-  $("pulse").className = "pulse" + (fresh ? " on" : "");
+  $("pulse").className = $("pulse-nav").className = "pulse" + (fresh ? " on" : "");
   $("hb").textContent = fresh ? `Live · scanned ${ago(e.last_scan)}` : (e.last_scan ? `last scan ${ago(e.last_scan)}` : "starting…");
   $("pipeline").innerHTML = pipelineHTML(c);
   $("pipeline2").innerHTML = pipelineHTML(c);
@@ -217,6 +218,55 @@ function renderLive(s) {
   }).join("");
   $("activity").innerHTML = s.activity.map((a) => `<li><time>${new Date(a.time * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</time>
      <span class="tag ${esc(a.kind)}">${esc(a.kind)}</span><span>${esc(a.msg)}</span></li>`).join("") || '<li class="muted">starting…</li>';
+}
+
+/* ------------------------------------------------------- live page */
+const MISTAKE = { gave_back: "was in profit, then reversed", bad_entry: "bad entry timing", stopped: "normal stop-loss",
+  slow_loss: "didn't play out in time", exit_rule: "closed by exit rule", news_negative: "bought on negative news" };
+let lastSeen = 0;
+function recent(s, kinds, secs) {
+  const now = s.server_time;
+  return s.activity.some((a) => kinds.includes(a.kind) && now - a.time < secs);
+}
+function renderLivePage(s) {
+  const c = s.pool, r = s.research, sm = s.summary, act = s.activity;
+  const count = (kinds) => act.filter((a) => kinds.includes(a.kind)).length;
+  const best = s.radar.find((x) => x.status !== "holding");
+  const st = [
+    { icon: "🧪", name: "Research", val: (c.tested_total || 0).toLocaleString(), sub: `round ${r.round} · ${r.paused ? "paused" : r.state}`, lit: r.state === "running" },
+    { icon: "🔬", name: "Live market test", val: c.testing || 0, sub: "strategies being proven", lit: recent(s, ["lab"], 60) },
+    { icon: "⭐", name: "LIVE strategies", val: c.live || 0, sub: `${c.retired || 0} retired so far`, lit: recent(s, ["lab"], 60) && (c.live || 0) > 0 },
+    { icon: "📡", name: "Scanning", val: `${s.symbols.length} coins`, sub: `every ${s.scan_seconds}s · ${ago(s.engine.last_scan)}`, lit: recent(s, ["scan"], s.scan_seconds + 8) },
+    { icon: "🎯", name: "Signals", val: count(["signal"]), sub: best ? `closest: ${best.symbol} ${best.met}/${best.total} rules` : "waiting", lit: recent(s, ["signal"], 120) },
+    { icon: "🛡️", name: "Risk · News · AI", val: count(["risk", "news", "ai"]), sub: "checks before every buy", lit: recent(s, ["risk", "news", "ai"], 120), warn: true },
+    { icon: "💱", name: "Trades", val: `${s.positions.length} open`, sub: `${sm.total_trades} finished`, lit: recent(s, ["trade"], 300) || s.positions.length > 0 },
+    { icon: "🧠", name: "Lessons", val: sm.total_trades, sub: "learned from every trade", lit: recent(s, ["lesson"], 300) },
+  ];
+  $("map").innerHTML = st.map((x) => `<div class="station ${x.lit ? (x.warn ? "warn" : "lit") + " flow" : ""}">
+      <div class="orb" aria-hidden="true">${x.icon}</div><b>${esc(x.val)}</b><div class="name">${x.name}</div><div class="sub">${esc(x.sub)}</div></div>`).join("");
+  $("live-clock").textContent = "now " + new Date(s.server_time * 1000).toLocaleTimeString();
+
+  const newest = act.length ? act[0].time : 0;
+  $("timeline").innerHTML = act.map((a) => `<li class="k-${esc(a.kind)} ${lastSeen && a.time > lastSeen ? "new" : ""}">
+      <div class="when"><span>${new Date(a.time * 1000).toLocaleTimeString()}</span><span class="tag ${esc(a.kind)}">${esc(a.kind)}</span></div>
+      <div class="what">${esc(a.msg)}</div></li>`).join("") || '<li class="k-system"><div class="what muted">starting…</div></li>';
+  lastSeen = newest;
+
+  const n = s.news || {}, mood = n.mood || {};
+  $("news-note").textContent = n.error ? `news unavailable: ${n.error} (retrying)` : n.updated ? `scored by ${n.source} · ${ago(n.updated)}` : "first check soon";
+  $("news-mood").innerHTML = Object.entries(mood).map(([k, v]) => {
+    const w = Math.min(50, Math.abs(v.score) * 50), left = v.score < 0 ? 50 - w : 50;
+    return `<div class="mood-row" title="${esc(v.reason)}"><span>${esc(k)}</span>
+      <div class="mood-bar"><i style="left:${left}%;width:${w}%;background:${v.score < 0 ? "var(--down)" : "var(--up)"}"></i></div>
+      <span class="${cls(v.score)}">${v.score > 0 ? "+" : ""}${v.score.toFixed(1)}</span></div>`;
+  }).join("") || '<div class="muted small">No news read yet.</div>';
+  $("headlines").innerHTML = (n.headlines || []).slice(0, 6).map((h) =>
+    `<li>${h.link ? `<a href="${esc(h.link)}" target="_blank" rel="noopener noreferrer">${esc(h.title)}</a>` : esc(h.title)}
+      <div class="muted small">${ago(h.time)}${h.coins && h.coins.length ? " · " + esc(h.coins.join(", ")) : ""}</div></li>`).join("");
+
+  const L = s.learning || {};
+  $("insights").innerHTML = (L.insights || []).map((x) => `<li>${esc(x)}</li>`).join("");
+  $("mistakes").innerHTML = Object.entries(L.mistakes || {}).map(([k, v]) => `<span>${esc(MISTAKE[k] || k)} × ${v}</span>`).join("");
 }
 
 /* ------------------------------------------------------ strategies */
@@ -252,7 +302,7 @@ async function loadTrades() {
   $("trade-stats").textContent = t.length ? `${t.length} trades · ${Math.round((100 * wins) / t.length)}% wins · total ${money(total)}` : "";
   $("trades-body").innerHTML = t.map((x) => `<tr><td>${dt(x.exit_time)}</td><td><b>${esc(x.symbol)}</b></td>
     <td title="${esc(x.note)}">${esc(x.strategy_id)}</td><td>${price(x.entry_price)}</td><td>${price(x.exit_price)}</td>
-    <td>${esc(x.reason)}</td><td class="${cls(x.pnl)}">${money(x.pnl)} <span class="small">${pct(x.return_pct)}</span></td></tr>`).join("");
+    <td>${esc(x.reason)}${x.lesson ? `<span class="lesson">${esc(x.lesson)}</span>` : ""}</td><td class="${cls(x.pnl)}">${money(x.pnl)} <span class="small">${pct(x.return_pct)}</span></td></tr>`).join("");
 }
 
 /* -------------------------------------------------------- backtest */
@@ -314,6 +364,7 @@ $("btn-test-ai").addEventListener("click", async () => {
 async function refreshTab() {
   try {
     if (state.tab === "overview") await Promise.all([loadEquity(), loadMessages()]);
+    else if (state.tab === "live") { if (state.last) renderLivePage(state.last); }
     else if (state.tab === "chart") await loadCandles();
     else if (state.tab === "strategies") await loadStrategies();
     else if (state.tab === "trades") await loadTrades();

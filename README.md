@@ -25,6 +25,33 @@ TradBot never stops working. Three things run at the same time:
 | **AI brain** (Gemini or Claude) | Suggests strategy ideas every few research rounds, reviews every buy (it can **block** a trade, never force one) and writes a daily report. Optional. |
 | **Dashboard** | Heartbeat, research counters, live view of what the bot sees, live activity feed, balance, trades, the whole strategy pipeline, backtest and settings. |
 
+## How a trade works (and how it should make money)
+
+1. **Research** finds strategies that made money on 3 years of history **and** on history they never saw.
+2. **Live market test:** each one is shadow-traded on new candles. Only winners go **LIVE**.
+3. **Signal:** when an hourly candle closes and **all** buy rules of a LIVE strategy are met, that's a buy signal.
+4. **Checks:** the **risk manager** (size, max trades, daily loss), the **news check** (very bad news on that
+   coin or the whole market = no buy) and the **AI review** (may block) must all say yes.
+5. **Buy** with a stop-loss and a target set at once. Trade size is reduced automatically for coins or
+   strategies that have been losing (learned from the journal).
+6. **Sell** at the target, the stop-loss, an exit rule or a time limit (checked every 30 seconds).
+7. **Lesson:** the bot records the best and worst price during the trade and writes what happened
+   (e.g. "was up 3% but reversed" or "bad entry timing"). These lessons change future trade sizes,
+   go to the AI when it invents strategies, and feed the AI's daily coach report.
+
+**Why this can make money:** not every trade wins. Strategies are chosen so the **wins are bigger than the losses**
+(e.g. target = 4 × ATR, stop = 2 × ATR) and losses are cut fast. Over many trades, a small edge adds up,
+while the risk rules keep any single mistake small. No bot can promise profit, which is why it paper trades first.
+
+## The Live page
+
+Click **Live** in the sidebar. It is the bot's mission control:
+- **The station map:** Research → Live market test → LIVE strategies → Scanning → Signals → Risk · News · AI → Trades → Lessons.
+  A station glows when it is doing something right now, and the line to the next one starts flowing.
+- **Timeline:** every step, newest on top (scans, research rounds, signals, checks, trades, lessons).
+- **News mood:** a score per coin from −1 (bad) to +1 (good), plus the latest headlines.
+- **What the bot learned:** its win/loss record, most common mistake, and which coins or strategies now trade smaller.
+
 ## Install and run on Windows: ONE file does everything
 
 1. **Download TradBot:** while logged in to GitHub, open
@@ -195,6 +222,8 @@ tradbot/
   backtest.py        honest backtester (next-candle entry, fees, worst-case fills)
   lab.py             one research round (invent, test, evolve, validate)
   pool.py            strategy pool: live market test, promotion, retirement
+  news.py            crypto news reader + mood score (blocks buys on bad news)
+  learn.py           lessons from every trade + learned trade sizes
   ml.py              LightGBM model with walk-forward training
   brain.py           AI brain (Gemini / Claude)
   risk.py            risk manager

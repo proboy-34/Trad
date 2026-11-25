@@ -13,6 +13,7 @@
     <div class="brand"><span class="logo"></span><div><b>TradBot</b><small>AI paper trading</small></div></div>
     <nav id="tabs">
       <button data-tab="overview" class="active">Overview</button>
+      <button data-tab="live" class="live-tab"><span class="pulse" id="pulse-nav"></span>Live</button>
       <button data-tab="chart">Chart</button>
       <button data-tab="strategies">Strategies</button>
       <button data-tab="trades">Trades</button>
@@ -86,6 +87,33 @@
       </div>
     </section>
 
+    <!-- LIVE -->
+    <section id="tab-live" class="tab">
+      <header class="head"><h1>Live</h1><span class="muted small" id="live-clock"></span></header>
+      <div class="space card">
+        <div class="map" id="map"></div>
+        <p class="muted small map-note">Each station lights up when it does something. Data flows left to right: research finds strategies → the live market test proves them → LIVE strategies scan the market → a signal must pass risk, news and AI checks → trade → lesson learned → better research.</p>
+      </div>
+      <div class="grid2 live-grid">
+        <div class="card space-soft">
+          <div class="card-head"><h2>Timeline</h2><span class="muted small">newest on top · updates every 5 s</span></div>
+          <ol class="timeline" id="timeline"></ol>
+        </div>
+        <div class="side-col">
+          <div class="card">
+            <div class="card-head"><h2>News mood</h2><span class="muted small" id="news-note"></span></div>
+            <div id="news-mood" class="mood"></div>
+            <ul class="headlines" id="headlines"></ul>
+          </div>
+          <div class="card">
+            <div class="card-head"><h2>What the bot learned</h2></div>
+            <ul class="insights" id="insights"></ul>
+            <div id="mistakes" class="mistakes"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <!-- CHART -->
     <section id="tab-chart" class="tab">
       <header class="head"><h1>Price chart</h1><div class="actions" id="sym-buttons"></div></header>
@@ -118,7 +146,7 @@
     <!-- TRADES -->
     <section id="tab-trades" class="tab">
       <header class="head"><h1>Trade history</h1><span class="muted" id="trade-stats"></span></header>
-      <div class="card"><div class="table-wrap"><table><thead><tr><th>Closed</th><th>Coin</th><th>Strategy</th><th>Entry</th><th>Exit</th><th>Why sold</th><th>P/L</th></tr></thead><tbody id="trades-body"></tbody></table></div>
+      <div class="card"><div class="table-wrap"><table><thead><tr><th>Closed</th><th>Coin</th><th>Strategy</th><th>Entry</th><th>Exit</th><th>Why sold · lesson</th><th>P/L</th></tr></thead><tbody id="trades-body"></tbody></table></div>
         <div id="trades-empty" class="empty">No finished trades yet.</div></div>
     </section>
 

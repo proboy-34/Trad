@@ -82,6 +82,15 @@ pool:
   retire_if_return_below_pct: -3.0
 
 # ---------------------------------------------------------------------
+#  NEWS - reads crypto news every 15 min; very bad news blocks NEW buys
+# ---------------------------------------------------------------------
+news:
+  enabled: true
+  refresh_minutes: 15
+  block_below: -0.5          # coin mood at or below this -> no new buys on that coin
+  market_block_below: -0.6   # whole-market mood at or below this -> no new buys at all
+
+# ---------------------------------------------------------------------
 #  MACHINE LEARNING model (LightGBM)
 # ---------------------------------------------------------------------
 ml:

@@ -79,3 +79,13 @@ def test_probation_strategies_are_not_swapped_every_round(pool):
     pool.review()
     live = pool.entries("live")
     assert any(not e["probation"] for e in live) and len(live) == 2
+
+
+def test_probation_prefers_different_kinds(pool):
+    same = [entry(i, val_sharpe=10 + i) for i in range(3)]               # all rsi_14 rules
+    other = Strategy(entry=[Condition("vol_z", ">", 1)])
+    diff = {**entry(9, val_sharpe=1), "strategy": other.to_dict()}
+    pool.data["pool"] = same + [diff]
+    pool.review()
+    kinds = {tuple(c["feature"] for c in e["strategy"]["entry"]) for e in pool.entries("live")}
+    assert kinds == {("rsi_14",), ("vol_z",)}

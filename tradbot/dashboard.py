@@ -57,7 +57,9 @@ class API:
             "radar": sorted(e.radar, key=lambda r: (r["status"] != "holding",
                                                     r["status"] != "signal",
                                                     -r["met"] / max(1, r["total"])))[:10],
-            "activity": list(e.activity)[-60:][::-1], "scan_seconds": e.scan_sec,
+            "activity": list(e.activity)[-80:][::-1], "scan_seconds": e.scan_sec,
+            "news": e.news.status(),
+            "learning": {k: e.adjust.get(k) for k in ("insights", "mistakes", "coins", "strategies")},
             "risk": e.cfg["risk"], "symbols": e.cfg["symbols"], "timeframe": e.tf,
             "server_time": time.time(),
         }
@@ -144,6 +146,8 @@ class API:
                 if body.get(field):
                     save_env_value(env, str(body[field]).strip())
             e.brain = Brain(e.cfg, on_message=e.brain.on_message)
+            e.news.brain = e.brain
+            e.brain.lessons = e.adjust.get("insights", [])
             return {"ok": True, "brain": e.brain.status()}
         if action == "test-ai":
             if not e.brain.available():

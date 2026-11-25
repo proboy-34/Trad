@@ -54,6 +54,8 @@ DEFAULTS: dict = {
         "retire_if_profit_factor_below": 0.9,
         "retire_if_return_below_pct": -3.0,
     },
+    "news": {"enabled": True, "refresh_minutes": 15, "block_below": -0.5,
+             "market_block_below": -0.6},
     "ml": {"enabled": True, "horizon_bars": 12, "target_pct": 0.6, "threads": 2},
     "brain": {
         "provider": "gemini",

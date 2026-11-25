@@ -22,6 +22,8 @@ from .brain import Brain
 from .config import DATA_DIR
 from .features import WARMUP_BARS, compute_features, fmt_value
 from .lab import Lab, load_active
+from .learn import learn, lesson_for, size_multiplier
+from .news import NewsWatcher
 from .pool import StrategyPool
 from .log import get_logger
 from .paper import PaperAccount, utc_day
@@ -107,12 +109,37 @@ class Engine:
         self._job_lock = threading.Lock()
         self._last_report_day = None
         self.pool = StrategyPool(cfg, self.account)
+        self.news = NewsWatcher(cfg, self.brain)
+        self._news_busy = False
+        self.adjust: dict = {}
+        self._relearn()
         self.research = {"state": "starting", "paused": False, "round": 0, "pct": 0,
                          "msg": "starting...", "last": {}}
         self.scan_sec = int(cfg.get("scan_seconds", 30))
         self.radar: list[dict] = []          # what every strategy sees right now
         self.activity = collections.deque(maxlen=300)   # live feed for the dashboard
         self.state["last_scan"] = None
+
+    def _relearn(self):
+        """Re-learns from ALL finished trades: trade sizes per coin/strategy and
+        the most common mistakes (also given to the AI brain)."""
+        self.adjust = learn(self.account.trades(500))
+        self.brain.lessons = self.adjust["insights"]
+
+    def _news_check(self):
+        if self._news_busy or not self.news.due():
+            return
+        self._news_busy = True
+
+        def work():
+            try:
+                for m in self.news.refresh():
+                    self.act(m, "news")
+            except Exception as e:
+                log.warning("News check failed: %s", e)
+            finally:
+                self._news_busy = False
+        threading.Thread(target=work, daemon=True, name="news").start()
 
     def act(self, msg: str, kind: str = "scan"):
         """Adds a line to the live activity feed (memory only, not the log file)."""
@@ -272,7 +299,13 @@ class Engine:
         if (self.cfg["brain"].get("daily_report") and t.tm_hour == 0 and t.tm_min >= 5
                 and self._last_report_day != today and self.brain.available()):
             self._last_report_day = today
-            self.brain.daily_report(self.summary())
+            self.brain.daily_report({**self.summary(), "lessons": self.adjust.get("insights"),
+                                     "mistakes": self.adjust.get("mistakes"),
+                                     "recent_trades": [
+                                         {k: t.get(k) for k in ("symbol", "strategy_id", "return_pct",
+                                                                "reason", "lesson")}
+                                         for t in self.account.trades(15)],
+                                     "news": {k: v["score"] for k, v in self.news.mood.items()}})
 
     # ----------------------------------------------------- fast checks
     def scan(self):
@@ -300,7 +333,11 @@ class Engine:
                 radar.append({"symbol": sym, "price": price, "change_pct": change,
                               "strategy": st.id, "status": status, **chk})
         self.radar = radar
+        for sym in {p["symbol"] for p in positions}:
+            if sym in self.prices:
+                self.account.update_extremes(sym, self.prices[sym])
         self.fast_check()
+        self._news_check()
         self.state["last_scan"] = time.time()
         # one readable line for the activity feed
         if not strategies:
@@ -388,11 +425,25 @@ class Engine:
         for s in strategies:
             if not s.entry_signal(last, last_prob).any():
                 continue
+            self.act(f"{sym} {s.id}: all buy rules met - BUY SIGNAL. Checking risk, news and AI...",
+                     "signal")
             eq = self.account.equity(self.prices)
             ok, why, size = self.risk.can_open(eq, sym, s.id)
             if not ok:
                 log.info("%s %s signal skipped: %s", sym, s.id, why)
-                self.act(f"{sym} {s.id}: buy signal, but skipped - {why}.", "decision")
+                self.act(f"{sym} {s.id}: risk manager said NO - {why}.", "risk")
+                continue
+            blocked = self.news.blocks(sym)
+            if blocked:
+                self.account.message("trade", f"NEWS BLOCKED buy {sym} ({s.id}): {blocked}")
+                self.act(f"{sym} {s.id}: news said NO - {blocked}.", "news")
+                continue
+            mult = size_multiplier(self.adjust, sym, s.id)
+            if mult < 1:
+                size *= mult
+                self.act(f"{sym} {s.id}: learned from past losses - trade size cut to "
+                         f"{int(mult * 100)}%.", "lesson")
+            if size < self.cfg["risk"]["min_trade_usdt"]:
                 continue
             atr = float(last["atr_pct"].iat[0])
             facts = {c.feature: fmt_value(c.feature, float(last[c.feature].iat[0])) for c in s.entry}
@@ -416,7 +467,8 @@ class Engine:
             stop = price * (1 - s.stop_atr * atr)
             take = price * (1 + s.take_atr * atr)
             hold_until = time.time() + s.max_hold * self.tf_sec
-            self.account.open_position(sym, s.to_dict(), price, size, stop, take, hold_until, note)
+            self.account.open_position(sym, s.to_dict(), price, size, stop, take, hold_until, note,
+                                       news_score=self.news.score(sym))
             msg = (f"BUY {sym} ${size:,.0f} at {price:,.2f} ({s.id}). "
                    f"Stop {stop:,.2f}, target {take:,.2f}")
             log.info(msg)
@@ -432,6 +484,14 @@ class Engine:
             self.account.message("trade", msg)
             self.act(msg, "trade")
             self.account.record_equity(self.account.equity(self.prices))
+            lesson, tags = lesson_for(t)
+            entry = t["entry_price"]
+            mae = (min(t.get("low_seen") or entry, t["exit_price"]) / entry - 1) * 100
+            mfe = (max(t.get("high_seen") or entry, t["exit_price"]) / entry - 1) * 100
+            self.account.set_lesson(t["trade_id"], lesson, tags, mae, mfe)
+            self.account.message("lesson", f"{t['symbol']} {t['strategy_id']}: {lesson}")
+            self.act(f"Lesson - {t['symbol']} {t['strategy_id']}: {lesson}", "lesson")
+            self._relearn()
 
     def _monitor(self):
         """Retire strategies that lose in the paper account (via the pool)."""

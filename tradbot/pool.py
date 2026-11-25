@@ -42,6 +42,11 @@ def _score_validation(e: dict) -> float:
     return min(v.get("sharpe", 0), e["research"].get("sharpe", 0)) + 0.25 * f.get("sharpe", 0)
 
 
+def _kind(e: dict) -> tuple:
+    """The 'family' of a strategy = which indicators its buy rules use."""
+    return tuple(sorted({c["feature"] for c in e["strategy"]["entry"]}))
+
+
 class StrategyPool:
     def __init__(self, cfg: dict, account=None):
         self.cfg = cfg
@@ -183,7 +188,16 @@ class StrategyPool:
                 ids = {x["strategy"]["id"] for x in live}
                 rest = sorted([e for e in keep if e["strategy"]["id"] not in ids],
                               key=_score_validation, reverse=True)
-                live += rest[: max(0, pc["min_live"] - len(live))]
+                # prefer DIFFERENT kinds of strategies (not 3 copies of one idea)
+                kinds = {_kind(x) for x in live}
+                for e in rest:
+                    if len(live) >= pc["min_live"]:
+                        break
+                    if _kind(e) not in kinds:
+                        live.append(e)
+                        kinds.add(_kind(e))
+                ids = {x["strategy"]["id"] for x in live}
+                live += [e for e in rest if e["strategy"]["id"] not in ids][: max(0, pc["min_live"] - len(live))]
             live_ids = {e["strategy"]["id"] for e in live}
             for e in keep:
                 old = e.get("stage")

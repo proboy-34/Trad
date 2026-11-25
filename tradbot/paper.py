@@ -53,8 +53,24 @@ class PaperAccount:
         with self.lock:
             self.db.execute("PRAGMA journal_mode=WAL")
             self.db.executescript(SCHEMA)
+            self._migrate()
             if not self.db.execute("SELECT 1 FROM account").fetchone():
                 self._create(cfg["paper"]["starting_balance"])
+
+    # columns added in later versions (old databases are upgraded in place)
+    NEW_COLUMNS = {
+        "positions": {"low_seen": "REAL", "high_seen": "REAL", "news_score": "REAL"},
+        "trades": {"stop": "REAL", "take": "REAL", "mae_pct": "REAL", "mfe_pct": "REAL",
+                   "lesson": "TEXT", "tags": "TEXT"},
+    }
+
+    def _migrate(self):
+        for table, cols in self.NEW_COLUMNS.items():
+            have = {r[1] for r in self.db.execute(f"PRAGMA table_info({table})")}
+            for name, kind in cols.items():
+                if name not in have:
+                    self.db.execute(f"ALTER TABLE {table} ADD COLUMN {name} {kind}")
+        self.db.commit()
 
     def _create(self, balance: float):
         self.db.execute(
@@ -140,8 +156,25 @@ class PaperAccount:
                             (ts or time.time(), value))
             self.db.commit()
 
+    def update_extremes(self, symbol: str, price: float, low: float | None = None,
+                        high: float | None = None):
+        """Remembers the lowest/highest price seen during each open trade (for lessons)."""
+        lo, hi = min(price, low or price), max(price, high or price)
+        with self.lock:
+            self.db.execute("UPDATE positions SET low_seen = MIN(COALESCE(low_seen, ?), ?),"
+                            " high_seen = MAX(COALESCE(high_seen, ?), ?) WHERE symbol = ?",
+                            (lo, lo, hi, hi, symbol))
+            self.db.commit()
+
+    def set_lesson(self, trade_id: int, lesson: str, tags: list[str], mae: float, mfe: float):
+        with self.lock:
+            self.db.execute("UPDATE trades SET lesson = ?, tags = ?, mae_pct = ?, mfe_pct = ?"
+                            " WHERE id = ?", (lesson, ",".join(tags), mae, mfe, trade_id))
+            self.db.commit()
+
     def open_position(self, symbol: str, strategy: dict, price: float, usdt: float,
-                      stop: float, take: float, max_hold_until: float, note: str = "") -> dict:
+                      stop: float, take: float, max_hold_until: float, note: str = "",
+                      news_score: float | None = None) -> dict:
         """Fake market BUY: pays slippage + fee, exactly like the backtester."""
         with self.lock:
             acc = self.account()
@@ -150,9 +183,10 @@ class PaperAccount:
             units = usdt * (1 - self.fee) / fill
             cur = self.db.execute(
                 "INSERT INTO positions (symbol, strategy_id, strategy_json, units, entry_price,"
-                " entry_time, cost, stop, take, max_hold_until, note) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                " entry_time, cost, stop, take, max_hold_until, note, low_seen, high_seen, news_score)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (symbol, strategy["id"], json.dumps(strategy), units, fill, time.time(), usdt,
-                 stop, take, max_hold_until, note))
+                 stop, take, max_hold_until, note, fill, fill, news_score))
             self.db.execute("UPDATE account SET cash = cash - ? WHERE id = 1", (usdt,))
             self.db.commit()
             return dict(self.db.execute("SELECT * FROM positions WHERE id = ?",
@@ -168,13 +202,15 @@ class PaperAccount:
             fill = price * (1 - self.slip)
             proceeds = p["units"] * fill * (1 - self.fee)
             pnl = proceeds - p["cost"]
-            self.db.execute(
+            cur = self.db.execute(
                 "INSERT INTO trades (symbol, strategy_id, entry_time, exit_time, entry_price,"
-                " exit_price, units, cost, proceeds, pnl, return_pct, reason, note)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                " exit_price, units, cost, proceeds, pnl, return_pct, reason, note, stop, take)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (p["symbol"], p["strategy_id"], p["entry_time"], time.time(), p["entry_price"], fill,
-                 p["units"], p["cost"], proceeds, pnl, 100 * pnl / p["cost"], reason, p["note"]))
+                 p["units"], p["cost"], proceeds, pnl, 100 * pnl / p["cost"], reason, p["note"],
+                 p["stop"], p["take"]))
+            trade_id = cur.lastrowid
             self.db.execute("DELETE FROM positions WHERE id = ?", (pos_id,))
             self.db.execute("UPDATE account SET cash = cash + ? WHERE id = 1", (proceeds,))
             self.db.commit()
-            return {**p, "exit_price": fill, "pnl": pnl, "reason": reason}
+            return {**p, "trade_id": trade_id, "exit_price": fill, "pnl": pnl, "reason": reason}
