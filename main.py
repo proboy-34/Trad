@@ -18,6 +18,22 @@ if sys.version_info < (3, 10):
              "Download it from https://www.python.org/downloads/")
 
 
+def _ensure_libraries():
+    """Hosting panels sometimes don't run 'pip install'. If a library is missing,
+    install everything from requirements.txt once, then continue."""
+    import importlib.util
+    needed = ["numpy", "pandas", "requests", "yaml", "lightgbm"]
+    if all(importlib.util.find_spec(m) for m in needed):
+        return
+    import subprocess
+    from pathlib import Path
+    req = Path(__file__).resolve().parent / "requirements.txt"
+    print("Some libraries are missing - installing them now (one time, a few minutes)...", flush=True)
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "--disable-pip-version-check",
+                           "-r", str(req)])
+    importlib.invalidate_caches()
+
+
 def _progress(pct, msg):
     print(f"  [{pct:5.1f}%] {msg}", flush=True)
 
@@ -127,6 +143,7 @@ def main():
     p.add_argument("--server", action="store_true",
                    help="hosting mode: dashboard reachable from the internet (needs DASHBOARD_PASSWORD)")
     args = p.parse_args()
+    _ensure_libraries()
 
     from tradbot.config import load_config
     from tradbot.log import get_logger
