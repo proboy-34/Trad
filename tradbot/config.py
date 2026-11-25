@@ -43,6 +43,7 @@ DEFAULTS: dict = {
         "pause_seconds": 20,
         "refresh_minutes": 60,
         "ai_ideas_every_rounds": 10,
+        "filter_every_hours": 6,
     },
     "pool": {
         "max_size": 300,

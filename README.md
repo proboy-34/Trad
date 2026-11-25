@@ -30,11 +30,14 @@ TradBot never stops working. Three things run at the same time:
 1. **Research** finds strategies that made money on 3 years of history **and** on history they never saw.
 2. **Live market test:** each one is shadow-traded on new candles. Only winners go **LIVE**.
 3. **Signal:** when an hourly candle closes and **all** buy rules of a LIVE strategy are met, that's a buy signal.
-4. **Checks:** the **risk manager** (size, max trades, daily loss), the **news check** (very bad news on that
-   coin or the whole market = no buy) and the **AI review** (may block) must all say yes.
+4. **Checks:** the **learned trade filter** (when switched on), the **risk manager** (size, max trades,
+   daily loss), the **news check** (very bad news on that coin or the whole market = no buy) and the
+   **AI review** (may block) must all say yes. Strategies still on **probation** trade at **half size**.
 5. **Buy** with a stop-loss and a target set at once. Trade size is reduced automatically for coins or
    strategies that have been losing (learned from the journal).
 6. **Sell** at the target, the stop-loss, an exit rule or a time limit (checked every 30 seconds).
+   Many strategies also use a **break-even stop**: once the price is up enough, the stop moves to the buy
+   price, so a winning trade can't turn into a real loss. (The backtester tests this too, pessimistically.)
 7. **Lesson:** the bot records the best and worst price during the trade and writes what happened
    (e.g. "was up 3% but reversed" or "bad entry timing"). These lessons change future trade sizes,
    go to the AI when it invents strategies, and feed the AI's daily coach report.
@@ -42,6 +45,22 @@ TradBot never stops working. Three things run at the same time:
 **Why this can make money:** not every trade wins. Strategies are chosen so the **wins are bigger than the losses**
 (e.g. target = 4 × ATR, stop = 2 × ATR) and losses are cut fast. Over many trades, a small edge adds up,
 while the risk rules keep any single mistake small. No bot can promise profit, which is why it paper trades first.
+
+## The learned trade filter
+
+A second ML model learns from thousands of trades that the pool's strategies made on data they were
+not built on, and tries to recognise signals that usually fail. It is trained on older trades and
+checked on newer ones it never saw; it **only switches on if it clearly improves those newer trades**.
+If it can't, it stays OFF (that is the honest result, not a bug). It retrains every 6 hours as
+more trades come in. Its status is shown on the Live page under "What the bot learned".
+
+## Safety details
+
+- **No double buys after a crash:** the bot remembers on disk which candle it already decided on.
+- **Breadth test:** a strategy must make money on at least half of the coins on unseen data, not just
+  one lucky coin.
+- **Benchmark:** the Overview shows what simply holding the 6 coins would have made since the start,
+  so you can see if the bot is really better.
 
 ## The Live page
 
@@ -224,6 +243,7 @@ tradbot/
   pool.py            strategy pool: live market test, promotion, retirement
   news.py            crypto news reader + mood score (blocks buys on bad news)
   learn.py           lessons from every trade + learned trade sizes
+  tradefilter.py     learned trade filter (switches on only if it helps)
   ml.py              LightGBM model with walk-forward training
   brain.py           AI brain (Gemini / Claude)
   risk.py            risk manager

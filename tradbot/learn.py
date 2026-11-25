@@ -19,6 +19,7 @@ LABELS = {
     "slow_loss": "idea didn't play out in time",
     "exit_rule": "closed early by the exit rule",
     "news_negative": "news mood was negative when buying",
+    "protected": "break-even stop saved a loss",
 }
 
 
@@ -49,6 +50,10 @@ def lesson_for(t: dict) -> tuple[str, list[str]]:
         else:
             tags.append("stopped")
             text = f"Normal loss: the idea didn't work, the stop-loss limited the damage to {mae:.2f}%."
+    elif reason == "break-even":
+        tags.append("protected")
+        text = (f"Protected: was up +{mfe:.2f}%, came back, and the break-even stop closed it "
+                "at about zero instead of a loss.")
     elif reason == "time limit":
         if t["pnl"] > 0:
             tags.append("slow_win")

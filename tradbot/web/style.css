@@ -186,6 +186,7 @@ tbody tr:hover { background: var(--panel-2); }
 .timeline li.k-lesson::before { border-color: #c084fc; background: #c084fc; }
 .timeline li.k-lab::before { border-color: var(--up); }
 .timeline li.k-news::before, .timeline li.k-risk::before, .timeline li.k-ai::before { border-color: var(--warn); }
+.timeline li.k-filter::before { border-color: #38bdf8; }
 .timeline li.k-error::before { border-color: var(--down); background: var(--down); }
 .timeline li.new { animation: slidein .5s ease; }
 @keyframes slidein { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: none; } }
@@ -203,7 +204,7 @@ tbody tr:hover { background: var(--panel-2); }
 .mistakes { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 .mistakes span { font-size: 11px; padding: 3px 9px; border-radius: 99px; background: rgba(192,132,252,.12); color: #d8b4fe; }
 .lesson { display: block; white-space: normal; color: var(--muted); font-size: 12px; max-width: 420px; }
-.tag.signal { color: var(--up); } .tag.lesson { color: #c084fc; } .tag.news { color: var(--warn); } .tag.risk { color: var(--warn); }
+.tag.signal { color: var(--up); } .tag.filter { color: #38bdf8; } .tag.lesson { color: #c084fc; } .tag.news { color: var(--warn); } .tag.risk { color: var(--warn); }
 @media (prefers-reduced-motion: reduce) { .station.flow::after, .timeline li.new { animation: none; } }
 
 @media (max-width: 1100px) {

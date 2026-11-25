@@ -38,6 +38,7 @@ class Strategy:
     max_hold: int = 48             # max candles to hold a trade
     exit: list[Condition] = field(default_factory=list)   # optional early exit
     ml_min_prob: float | None = None   # only buy if ML model agrees this much
+    be_atr: float | None = None    # move stop to break-even after +be_atr x ATR (None = off)
     origin: str = "random"         # random | evolved | ai
     id: str = ""
 
@@ -51,6 +52,8 @@ class Strategy:
         d = self.to_dict()
         d.pop("id", None)
         d.pop("origin", None)
+        if d.get("be_atr") is None:        # keeps ids of older strategies unchanged
+            d.pop("be_atr", None)
         raw = json.dumps(d, sort_keys=True)
         return "S" + hashlib.sha1(raw.encode()).hexdigest()[:7].upper()
 
@@ -60,7 +63,8 @@ class Strategy:
 
     @staticmethod
     def from_dict(d: dict) -> "Strategy":
-        keys = {"entry", "stop_atr", "take_atr", "max_hold", "exit", "ml_min_prob", "origin", "id"}
+        keys = {"entry", "stop_atr", "take_atr", "max_hold", "exit", "ml_min_prob", "be_atr",
+                "origin", "id"}
         return Strategy(**{k: v for k, v in d.items() if k in keys})
 
     # ------------------------------------------------------------ signals
@@ -113,6 +117,8 @@ class Strategy:
         sell = [f"stop-loss at {self.stop_atr:.1f} x ATR below entry",
                 f"take-profit at {self.take_atr:.1f} x ATR above entry",
                 f"or after {self.max_hold} candles"]
+        if self.be_atr:
+            sell.insert(1, f"stop moves to break-even once price is up {self.be_atr:.1f} x ATR")
         if self.exit:
             sell.append("or early when " + " AND ".join(c.describe() for c in self.exit))
         return {"buy": "BUY when " + buy, "sell": "SELL at " + ", ".join(sell)}
@@ -125,6 +131,7 @@ class StrategyGenerator:
     rule is sensible (e.g. RSI thresholds between 10 and 90)."""
 
     QUANTILES = [0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95]
+    BE_CHOICES = [None, None, 1.0, 1.5, 2.0]        # break-even stop: off, or after +x ATR
 
     def __init__(self, feats: pd.DataFrame, seed: int | None = None, use_ml: bool = False):
         self.rng = random.Random(seed)
@@ -162,6 +169,7 @@ class StrategyGenerator:
             take_atr=self.rng.choice([1.5, 2.0, 3.0, 4.0, 6.0]),
             max_hold=self.rng.choice([12, 24, 48, 96]),
             exit=exits, ml_min_prob=ml, origin="random",
+            be_atr=self.rng.choice(self.BE_CHOICES),
         )
 
     def mutate(self, s: Strategy) -> Strategy:
@@ -186,8 +194,10 @@ class StrategyGenerator:
             d["stop_atr"] = self.rng.choice([1.0, 1.5, 2.0, 2.5, 3.0])
         elif r < 0.9:
             d["take_atr"] = self.rng.choice([1.5, 2.0, 3.0, 4.0, 6.0])
-        else:
+        elif r < 0.95:
             d["max_hold"] = self.rng.choice([12, 24, 48, 96])
+        else:
+            d["be_atr"] = self.rng.choice(self.BE_CHOICES)
         d["origin"] = "evolved"
         return Strategy.from_dict(d)
 
@@ -201,7 +211,7 @@ class StrategyGenerator:
                         stop_atr=pick.stop_atr, take_atr=pick.take_atr,
                         max_hold=pick.max_hold, exit=list(pick.exit),
                         ml_min_prob=self.rng.choice([a.ml_min_prob, b.ml_min_prob]),
-                        origin="evolved")
+                        be_atr=self.rng.choice([a.be_atr, b.be_atr]), origin="evolved")
 
 
 def validate_strategy_dict(d: dict) -> Strategy | None:
@@ -217,6 +227,8 @@ def validate_strategy_dict(d: dict) -> Strategy | None:
         d["stop_atr"] = float(min(max(float(d.get("stop_atr", 2.0)), 0.5), 5.0))
         d["take_atr"] = float(min(max(float(d.get("take_atr", 4.0)), 0.5), 10.0))
         d["max_hold"] = int(min(max(int(d.get("max_hold", 48)), 2), 240))
+        be = d.get("be_atr")
+        d["be_atr"] = None if be in (None, "", "null", 0) else float(min(max(float(be), 0.5), 5.0))
         mp = d.get("ml_min_prob")
         d["ml_min_prob"] = None if mp in (None, "", "null") else float(min(max(float(mp), 0.3), 0.9))
         d["origin"] = "ai"

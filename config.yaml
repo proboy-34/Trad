@@ -67,6 +67,7 @@ research:
   pause_seconds: 20         # short break between rounds (bigger = PC stays cooler)
   refresh_minutes: 60       # download new candles + re-run the live market test
   ai_ideas_every_rounds: 10 # ask the AI brain for ideas every N rounds
+  filter_every_hours: 6     # retrain the learned trade filter
 
 # ---------------------------------------------------------------------
 #  STRATEGY POOL - new -> live market test -> LIVE -> retired

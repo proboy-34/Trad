@@ -25,6 +25,7 @@ from .lab import Lab, load_active
 from .learn import learn, lesson_for, size_multiplier
 from .news import NewsWatcher
 from .pool import StrategyPool
+from .tradefilter import TradeFilter
 from .log import get_logger
 from .paper import PaperAccount, utc_day
 from .risk import RiskManager
@@ -110,6 +111,7 @@ class Engine:
         self._last_report_day = None
         self.pool = StrategyPool(cfg, self.account)
         self.news = NewsWatcher(cfg, self.brain)
+        self.filter = TradeFilter(cfg)
         self._news_busy = False
         self.adjust: dict = {}
         self._relearn()
@@ -177,6 +179,7 @@ class Engine:
         use_ml = bool(self.cfg["ml"]["enabled"] and ml.HAVE_LGB)
         datasets, probs = None, {}
         last_refresh = last_train = 0.0
+        last_filter = self.filter.report.get("updated") or 0.0
         while not self._stop.is_set():
             if self.research["paused"]:
                 self.research.update(state="paused", msg="Research paused by you")
@@ -204,6 +207,15 @@ class Engine:
                     self.research.update(msg="Live market test of every strategy in the pool...")
                     self.pool.forward_test(datasets, probs, self.tf)
                     self._review_pool()
+                    if time.time() - last_filter > rc.get("filter_every_hours", 6) * 3600:
+                        self.research.update(msg="Trade filter learning from thousands of past "
+                                                 "trades on unseen data...")
+                        rows = self.filter.collect(self.pool.entries(), datasets, probs, self.tf,
+                                                   self.cfg["lab"]["split"][0])
+                        rep = self.filter.train(rows)
+                        last_filter = time.time()
+                        self.act(f"Trade filter retrained on {rep.get('trades', 0)} trades: "
+                                 f"{rep['status']}.", "filter")
                     c = self.pool.counts()
                     self.act(f"Live market test updated: {c['testing']} strategies testing, "
                              f"{c['live']} live, {c['retired']} retired.", "lab")
@@ -333,6 +345,10 @@ class Engine:
                 radar.append({"symbol": sym, "price": price, "change_pct": change,
                               "strategy": st.id, "status": status, **chk})
         self.radar = radar
+        bench = self.account.get("bench_start") or {}
+        missing = {k: v for k, v in self.prices.items() if k not in bench}
+        if missing:
+            self.account.put("bench_start", {**bench, **missing})
         for sym in {p["symbol"] for p in positions}:
             if sym in self.prices:
                 self.account.update_extremes(sym, self.prices[sym])
@@ -360,12 +376,26 @@ class Engine:
                 line += f" Watching stop-loss/target on {len(positions)} open trade(s)."
             self.act(line)
 
+    def _break_even(self, p, high: float) -> dict:
+        """Moves the stop to break-even once the price reached the trigger."""
+        if p.get("be_trigger") and not p.get("be_done") and high >= p["be_trigger"]:
+            new = self.account.move_stop_to_break_even(p["id"])
+            if new:
+                p = {**p, "stop": new, "be_done": 1}
+                shown = f"{new:,.2f}" if new >= 1 else f"{new:.6f}"
+                self.act(f"{p['symbol']} {p['strategy_id']}: price is up enough - stop-loss moved to "
+                         f"break-even ({shown}). This trade can no longer turn into a real loss "
+                         "(except a sudden gap).", "trade")
+        return p
+
     def fast_check(self):
-        """Stop-loss / take-profit using the latest live prices."""
+        """Stop-loss / take-profit / break-even using the latest live prices."""
         for p in self.account.positions():
             price = self.prices.get(p["symbol"]) or data.fetch_price(p["symbol"])
+            self.account.update_extremes(p["symbol"], price)
+            p = self._break_even(p, price)
             if price <= p["stop"]:
-                self._close(p, min(price, p["stop"]), "stop-loss")
+                self._close(p, min(price, p["stop"]), "break-even" if p.get("be_done") else "stop-loss")
             elif price >= p["take"]:
                 self._close(p, price, "take-profit")
 
@@ -373,6 +403,7 @@ class Engine:
     def hourly_cycle(self):
         active = load_active().get("active", [])
         strategies = [Strategy.from_dict(a["strategy"]) for a in active]
+        self._probation = {a["strategy"]["id"] for a in active if a.get("probation")}
         for sym in self.cfg["symbols"]:
             df = data.fetch_recent(sym, self.tf, 400)
             if len(df) < WARMUP_BARS + 5:
@@ -385,8 +416,9 @@ class Engine:
             self.prices[sym] = price
             candle_t = int(feats["time"].iat[-1])
             self._exits(sym, feats, price)
-            if self.last_candle.get(sym) != candle_t:
-                self.last_candle[sym] = candle_t
+            decided = self.account.get("decided:" + sym)
+            if decided != candle_t:
+                self.account.put("decided:" + sym, candle_t)   # survives crashes/restarts
                 self._entries(sym, feats, probs, price, strategies)
         eq = self.account.equity(self.prices)
         self.risk.update(eq)
@@ -405,11 +437,12 @@ class Engine:
             hit = None
             for row in after.itertuples():
                 if row.low <= p["stop"]:
-                    hit = (min(p["stop"], row.open), "stop-loss")
+                    hit = (min(p["stop"], row.open), "break-even" if p.get("be_done") else "stop-loss")
                     break
                 if row.high >= p["take"]:
                     hit = (max(p["take"], row.open), "take-profit")
                     break
+                p = self._break_even(p, row.high)     # takes effect from the next candle
             if hit:
                 self._close(p, hit[0], hit[1])
                 continue
@@ -425,8 +458,14 @@ class Engine:
         for s in strategies:
             if not s.entry_signal(last, last_prob).any():
                 continue
-            self.act(f"{sym} {s.id}: all buy rules met - BUY SIGNAL. Checking risk, news and AI...",
-                     "signal")
+            self.act(f"{sym} {s.id}: all buy rules met - BUY SIGNAL. Checking filter, risk, news "
+                     "and AI...", "signal")
+            ml_now = None if last_prob is None or np.isnan(last_prob[0]) else float(last_prob[0])
+            ok_f, win_p = self.filter.check(last.iloc[0], s, ml_now)
+            if not ok_f:
+                self.act(f"{sym} {s.id}: trade filter said NO - signals like this won only "
+                         f"{win_p:.0%} of the time in past trades.", "filter")
+                continue
             eq = self.account.equity(self.prices)
             ok, why, size = self.risk.can_open(eq, sym, s.id)
             if not ok:
@@ -439,6 +478,10 @@ class Engine:
                 self.act(f"{sym} {s.id}: news said NO - {blocked}.", "news")
                 continue
             mult = size_multiplier(self.adjust, sym, s.id)
+            if s.id in getattr(self, "_probation", set()):
+                size *= 0.5
+                self.act(f"{sym} {s.id}: strategy is on probation (not proven in the live market "
+                         "test yet) - half size.", "risk")
             if mult < 1:
                 size *= mult
                 self.act(f"{sym} {s.id}: learned from past losses - trade size cut to "
@@ -451,6 +494,8 @@ class Engine:
             note = f"{s.id}: " + "; ".join(f"{k}={v}" for k, v in facts.items())
             if ml_p is not None:
                 note += f"; ML={ml_p:.0%}"
+            if win_p is not None:
+                note += f"; filter win chance={win_p:.0%}"
             if self.brain.available() and self.cfg["brain"].get("review_trades"):
                 ctx = {"symbol": sym, "price": price, "strategy": s.id,
                        "rules": s.describe()["buy"], "indicator_values": facts, "ml_probability": ml_p,
@@ -467,8 +512,9 @@ class Engine:
             stop = price * (1 - s.stop_atr * atr)
             take = price * (1 + s.take_atr * atr)
             hold_until = time.time() + s.max_hold * self.tf_sec
+            be_trigger = price * (1 + s.be_atr * atr) if s.be_atr else None
             self.account.open_position(sym, s.to_dict(), price, size, stop, take, hold_until, note,
-                                       news_score=self.news.score(sym))
+                                       news_score=self.news.score(sym), be_trigger=be_trigger)
             msg = (f"BUY {sym} ${size:,.0f} at {price:,.2f} ({s.id}). "
                    f"Stop {stop:,.2f}, target {take:,.2f}")
             log.info(msg)
@@ -503,7 +549,10 @@ class Engine:
         eq = self.account.equity(self.prices)
         trades = self.account.trades(500)
         today = [t for t in trades if utc_day(t["exit_time"]) == utc_day()]
+        bench = self.account.get("bench_start") or {}
+        rets = [self.prices[k] / v - 1 for k, v in bench.items() if k in self.prices and v]
         return {
+            "hold_return_pct": (sum(rets) / len(rets) * 100) if rets else None,
             "equity": eq, "start_balance": acc["start_balance"],
             "total_return_pct": (eq / acc["start_balance"] - 1) * 100,
             "today_pnl_pct": (eq / acc["day_start_equity"] - 1) * 100 if acc["day_start_equity"] else 0,

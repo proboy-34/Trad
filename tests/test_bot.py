@@ -111,6 +111,12 @@ def test_unseen_test_rules():
     assert not passes_unseen_test({**good, "return_pct": -15, "sharpe": -1}, 10, 20)
     assert not passes_unseen_test({**good, "max_dd_pct": 35}, 10, 20)
     assert not passes_unseen_test({**good, "return_pct": -0.5}, 10, 20)   # small loss = fail
+    lucky = {**good, "per_symbol": {"A": {"return_pct": 20}, "B": {"return_pct": -1},
+                                    "C": {"return_pct": -2}, "D": {"return_pct": -1}}}
+    assert not passes_unseen_test(lucky, 10, 20)      # big win on ONE coin is not enough
+    broad = {**good, "per_symbol": {"A": {"return_pct": 2}, "B": {"return_pct": 1},
+                                    "C": {"return_pct": -1}, "D": {"return_pct": 0.5}}}
+    assert passes_unseen_test(broad, 10, 20)
 
 
 def test_lab_round_and_pool_end_to_end(tmp_path, monkeypatch):
@@ -176,3 +182,27 @@ def test_paper_only_mode():
         p.write_text(yaml.safe_dump({"mode": "live"}))
         with pytest.raises(SystemExit):
             config_mod.load_config(p)
+
+
+def test_break_even_stop_in_backtest():
+    """Up 1.5 ATR, then falls back: with break-even it exits near zero
+    instead of taking the full stop-loss. Never counts on the trigger candle."""
+    n = WARMUP_BARS + 30
+    f = compute_features(data.synthetic_candles(n, seed=4))
+    f.loc[:, ["open", "high", "low", "close"]] = 100.0
+    f["atr_pct"] = 0.01
+    e = WARMUP_BARS + 1
+    f.loc[e + 1, "high"] = 101.6                       # +1.6% = 1.6 ATR -> break-even armed
+    f.loc[e + 3, ["open", "low", "close"]] = [99.0, 97.0, 97.5]   # then falls through
+    base = dict(entry=[Condition("atr_pct", ">", 0)], stop_atr=2, take_atr=4, max_hold=20)
+    be = backtest.run(Strategy(**base, be_atr=1.5), f, WARMUP_BARS, n,
+                      backtest.Costs(0.1, 0.05, 1), record_trades=True).trades[0]
+    plain = backtest.run(Strategy(**base), f, WARMUP_BARS, n,
+                         backtest.Costs(0.1, 0.05, 1), record_trades=True).trades[0]
+    assert plain["reason"] == "stop" and plain["return_pct"] < -2
+    assert be["reason"] == "breakeven" and be["return_pct"] > plain["return_pct"]
+    # fill is the worse of break-even price and the gap-down open (99) -> small loss
+    assert -1.5 < be["return_pct"] < 0.5
+    s = Strategy(**base, be_atr=1.5)
+    assert Strategy.from_dict(json.loads(json.dumps(s.to_dict()))).be_atr == 1.5
+    assert Strategy(**base).id != s.id

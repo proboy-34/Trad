@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS trades (
   pnl REAL, return_pct REAL, reason TEXT, note TEXT
 );
 CREATE TABLE IF NOT EXISTS equity (time REAL PRIMARY KEY, equity REAL);
+CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT);
 CREATE TABLE IF NOT EXISTS messages (
   id INTEGER PRIMARY KEY AUTOINCREMENT, time REAL, kind TEXT, text TEXT
 );
@@ -59,7 +60,8 @@ class PaperAccount:
 
     # columns added in later versions (old databases are upgraded in place)
     NEW_COLUMNS = {
-        "positions": {"low_seen": "REAL", "high_seen": "REAL", "news_score": "REAL"},
+        "positions": {"low_seen": "REAL", "high_seen": "REAL", "news_score": "REAL",
+                      "be_trigger": "REAL", "be_price": "REAL", "be_done": "INTEGER"},
         "trades": {"stop": "REAL", "take": "REAL", "mae_pct": "REAL", "mfe_pct": "REAL",
                    "lesson": "TEXT", "tags": "TEXT"},
     }
@@ -81,7 +83,7 @@ class PaperAccount:
 
     def reset(self):
         with self.lock:
-            for t in ("account", "positions", "trades", "equity"):
+            for t in ("account", "positions", "trades", "equity", "kv"):
                 self.db.execute(f"DELETE FROM {t}")
             self._create(self.cfg["paper"]["starting_balance"])
             self.message("system", "Paper account was reset to the starting balance.")
@@ -166,6 +168,28 @@ class PaperAccount:
                             (lo, lo, hi, hi, symbol))
             self.db.commit()
 
+    def move_stop_to_break_even(self, pos_id: int) -> float | None:
+        """Moves the stop up to the break-even price (never down). Returns new stop."""
+        with self.lock:
+            row = self.db.execute("SELECT stop, be_price FROM positions WHERE id = ? AND"
+                                  " be_done = 0 AND be_price IS NOT NULL", (pos_id,)).fetchone()
+            if not row:
+                return None
+            new = max(row["stop"], row["be_price"])
+            self.db.execute("UPDATE positions SET stop = ?, be_done = 1 WHERE id = ?", (new, pos_id))
+            self.db.commit()
+            return new
+
+    def get(self, key: str, default=None):
+        with self.lock:
+            row = self.db.execute("SELECT v FROM kv WHERE k = ?", (key,)).fetchone()
+        return json.loads(row["v"]) if row else default
+
+    def put(self, key: str, value):
+        with self.lock:
+            self.db.execute("INSERT OR REPLACE INTO kv (k, v) VALUES (?, ?)", (key, json.dumps(value)))
+            self.db.commit()
+
     def set_lesson(self, trade_id: int, lesson: str, tags: list[str], mae: float, mfe: float):
         with self.lock:
             self.db.execute("UPDATE trades SET lesson = ?, tags = ?, mae_pct = ?, mfe_pct = ?"
@@ -174,7 +198,7 @@ class PaperAccount:
 
     def open_position(self, symbol: str, strategy: dict, price: float, usdt: float,
                       stop: float, take: float, max_hold_until: float, note: str = "",
-                      news_score: float | None = None) -> dict:
+                      news_score: float | None = None, be_trigger: float | None = None) -> dict:
         """Fake market BUY: pays slippage + fee, exactly like the backtester."""
         with self.lock:
             acc = self.account()
@@ -183,10 +207,11 @@ class PaperAccount:
             units = usdt * (1 - self.fee) / fill
             cur = self.db.execute(
                 "INSERT INTO positions (symbol, strategy_id, strategy_json, units, entry_price,"
-                " entry_time, cost, stop, take, max_hold_until, note, low_seen, high_seen, news_score)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                " entry_time, cost, stop, take, max_hold_until, note, low_seen, high_seen, news_score,"
+                " be_trigger, be_price, be_done) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (symbol, strategy["id"], json.dumps(strategy), units, fill, time.time(), usdt,
-                 stop, take, max_hold_until, note, fill, fill, news_score))
+                 stop, take, max_hold_until, note, fill, fill, news_score,
+                 be_trigger, fill * (1 + 2 * self.fee + 2 * self.slip) if be_trigger else None, 0))
             self.db.execute("UPDATE account SET cash = cash - ? WHERE id = 1", (usdt,))
             self.db.commit()
             return dict(self.db.execute("SELECT * FROM positions WHERE id = ?",

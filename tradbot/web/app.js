@@ -69,7 +69,8 @@ async function loadState() {
   $("k-equity").textContent = money(sm.equity);
   $("k-start").textContent = "started with " + money(sm.start_balance, 0);
   $("k-total").textContent = pct(sm.total_return_pct); $("k-total").className = cls(sm.total_return_pct);
-  $("k-total-usd").textContent = money(sm.equity - sm.start_balance);
+  $("k-total-usd").innerHTML = money(sm.equity - sm.start_balance)
+    + (sm.hold_return_pct != null ? ` · just holding the coins: <span class="${cls(sm.hold_return_pct)}">${pct(sm.hold_return_pct)}</span>` : "");
   $("k-today").textContent = pct(sm.today_pnl_pct); $("k-today").className = cls(sm.today_pnl_pct);
   $("k-dd").textContent = s.drawdown_pct > 0.005 ? "−" + s.drawdown_pct.toFixed(2) + "%" : "0%";
   $("k-daylimit").textContent = s.risk.daily_loss_limit_pct;
@@ -238,7 +239,7 @@ function renderLivePage(s) {
     { icon: "⭐", name: "LIVE strategies", val: c.live || 0, sub: `${c.retired || 0} retired so far`, lit: recent(s, ["lab"], 60) && (c.live || 0) > 0 },
     { icon: "📡", name: "Scanning", val: `${s.symbols.length} coins`, sub: `every ${s.scan_seconds}s · ${ago(s.engine.last_scan)}`, lit: recent(s, ["scan"], s.scan_seconds + 8) },
     { icon: "🎯", name: "Signals", val: count(["signal"]), sub: best ? `closest: ${best.symbol} ${best.met}/${best.total} rules` : "waiting", lit: recent(s, ["signal"], 120) },
-    { icon: "🛡️", name: "Risk · News · AI", val: count(["risk", "news", "ai"]), sub: "checks before every buy", lit: recent(s, ["risk", "news", "ai"], 120), warn: true },
+    { icon: "🛡️", name: "Filter · Risk · News · AI", val: count(["filter", "risk", "news", "ai"]), sub: `checks before every buy · filter ${s.filter && s.filter.enabled ? "ON" : "OFF"}`, lit: recent(s, ["filter", "risk", "news", "ai"], 120), warn: true },
     { icon: "💱", name: "Trades", val: `${s.positions.length} open`, sub: `${sm.total_trades} finished`, lit: recent(s, ["trade"], 300) || s.positions.length > 0 },
     { icon: "🧠", name: "Lessons", val: sm.total_trades, sub: "learned from every trade", lit: recent(s, ["lesson"], 300) },
   ];
@@ -264,8 +265,9 @@ function renderLivePage(s) {
     `<li>${h.link ? `<a href="${esc(h.link)}" target="_blank" rel="noopener noreferrer">${esc(h.title)}</a>` : esc(h.title)}
       <div class="muted small">${ago(h.time)}${h.coins && h.coins.length ? " · " + esc(h.coins.join(", ")) : ""}</div></li>`).join("");
 
-  const L = s.learning || {};
-  $("insights").innerHTML = (L.insights || []).map((x) => `<li>${esc(x)}</li>`).join("");
+  const L = s.learning || {}, F = s.filter || {};
+  const fline = F.trades ? `Trade filter ${F.enabled ? "ON" : "OFF"}: learned from ${F.trades.toLocaleString()} past trades. On ${F.test_trades} newer trades it never saw: all trades averaged ${pct(F.all_avg_pct)} (${F.all_win_rate}% wins)` + (F.threshold != null ? `, the trades it keeps averaged ${pct(F.kept_avg_pct)} (${F.kept_win_rate}% wins, keeps ${Math.round(F.kept_frac * 100)}%).` : ".") : `Trade filter: ${F.status || "not trained yet"}.`;
+  $("insights").innerHTML = [fline, ...(L.insights || [])].map((x) => `<li>${esc(x)}</li>`).join("");
   $("mistakes").innerHTML = Object.entries(L.mistakes || {}).map(([k, v]) => `<span>${esc(MISTAKE[k] || k)} × ${v}</span>`).join("");
 }
 

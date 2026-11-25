@@ -243,6 +243,9 @@ class Lab:
 
 def passes_unseen_test(v: dict, min_trades: int, max_dd: float) -> bool:
     """Rules a strategy must pass on data it has never seen."""
+    per = v.get("per_symbol") or {}
+    if per and sum(m["return_pct"] > 0 for m in per.values()) < len(per) / 2:
+        return False                                             # must win on half the coins+
     return (v["trades"] >= min_trades
             and v["return_pct"] > 0                              # made money
             and v["sharpe"] > 0                                  # ...also risk-adjusted

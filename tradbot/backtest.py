@@ -101,7 +101,17 @@ def run(strategy: Strategy, feats: pd.DataFrame, start: int = 0, end: int | None
         hit_exit[-1] = False                        # exit signal needs a next candle
         first = lambda m: int(np.argmax(m)) if m.any() else 10**9
         js, jt, jx = first(hit_stop), first(hit_take), first(hit_exit)
-        k = min(js, jt, jx)
+        # break-even stop: once the price is up be_atr x ATR, the stop moves to the
+        # buy price (+ fees). Pessimistic: it only counts from the NEXT candle.
+        jbe = 10**9
+        be_px = entry_px * (1 + 2 * fee + 2 * slip)
+        if strategy.be_atr:
+            jb = first(h[seg] >= entry_px * (1 + strategy.be_atr * atr[i]))
+            if jb < 10**9 and jb + 1 < last + 1 - e:
+                after = l[seg][jb + 1:] <= be_px
+                if after.any():
+                    jbe = jb + 1 + int(np.argmax(after))
+        k = min(js, jt, jx, jbe)
         if k == 10**9:                              # time exit at close of `last`
             x = last
             exit_raw, reason = c[x], "time"
@@ -109,6 +119,8 @@ def run(strategy: Strategy, feats: pd.DataFrame, start: int = 0, end: int | None
             x = e + k
             if js == k:                             # stop first (or same candle as take)
                 exit_raw, reason = min(stop_px, o[x]) if x > e else stop_px, "stop"
+            elif jbe == k:                          # break-even stop (before take if same candle)
+                exit_raw, reason = min(be_px, o[x]), "breakeven"
             elif jt == k:
                 exit_raw, reason = max(take_px, o[x]) if x > e else take_px, "take"
             else:                                   # signal exit -> next open
@@ -132,7 +144,7 @@ def run(strategy: Strategy, feats: pd.DataFrame, start: int = 0, end: int | None
             trades.append({
                 "entry_time": int(feats["time"].iat[e]), "exit_time": int(feats["time"].iat[x]),
                 "entry": float(entry_px), "exit": float(exit_px),
-                "return_pct": float(trade_ret * 100), "reason": reason,
+                "return_pct": float(trade_ret * 100), "reason": reason, "i": int(i),
             })
         ptr = int(np.searchsorted(sig_idx, x))    # next signal at/after exit candle
     equity[filled_to - start:] = eq
