@@ -30,9 +30,9 @@ DEFAULTS: dict = {
     "eco_mode": True,             # lower CPU priority so your PC stays fast
     "paper": {"starting_balance": 10000, "fee_pct": 0.1, "slippage_pct": 0.05},
     "risk": {
-        "max_position_pct": 25,
-        "max_open_positions": 3,
-        "max_new_per_candle": 2,  # coins move together: don't open many trades at once
+        "max_position_pct": 20,
+        "max_open_positions": 5,
+        "max_new_per_candle": 3,  # coins move together: don't open many trades at once
         "daily_loss_limit_pct": 5,
         "kill_switch_drawdown_pct": 20,
         "min_trade_usdt": 10,
@@ -78,6 +78,14 @@ DEFAULTS: dict = {
         "use_news": True,
         "max_calls_per_hour": 20,
     },
+    "learning": {                 # separate fake account for many small LEARNING trades
+        "enabled": True,
+        "daily_target": 10,       # at least this many learning trades per day
+        "daily_max": 40,
+        "trade_usdt": 200,        # size of each learning trade
+        "max_open": 20,
+        "max_new_per_candle": 6,
+    },
     "notify": {"trades": True, "lessons": False, "daily": True, "alerts": True,
                "daily_hour": 21},     # local time of the daily summary
     "backup": {"keep_days": 7},
@@ -107,6 +115,11 @@ LIMITS = [
     (("ml", "threads"), 1, 64),
     (("news", "refresh_minutes"), 5, 1440),
     (("backup", "keep_days"), 1, 365),
+    (("learning", "daily_target"), 0, 500),
+    (("learning", "daily_max"), 1, 1000),
+    (("learning", "trade_usdt"), 10, 1e9),
+    (("learning", "max_open"), 1, 500),
+    (("learning", "max_new_per_candle"), 1, 100),
     (("notify", "daily_hour"), 0, 23),
     (("dashboard", "port"), 1024, 65535),
 ]

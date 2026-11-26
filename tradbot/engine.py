@@ -124,7 +124,8 @@ class Engine:
         self.cfg = cfg
         self.tf = cfg["timeframe"]
         self.tf_sec = data.TF_MS[self.tf] // 1000
-        self.account = PaperAccount(cfg)
+        self.account = PaperAccount(cfg)                                # main paper account
+        self.learn_acc = PaperAccount(cfg, db_path=DATA_DIR / "learning.db")  # learning trades
         self.risk = RiskManager(cfg, self.account)
         self.notifier = Notifier(cfg)
         self.brain = Brain(cfg, on_message=self._on_ai)
@@ -146,6 +147,8 @@ class Engine:
         self._last_backup_day = None
         self._probation: set[str] = set()
         self._new_this_candle = 0
+        self._learn_new = 0
+        self._learn_cands: list[Strategy] = []
         self.pool = StrategyPool(cfg, self.account)
         self.news = NewsWatcher(cfg, self.brain)
         self.filter = TradeFilter(cfg)
@@ -178,7 +181,9 @@ class Engine:
     def _relearn(self):
         """Re-learns from ALL finished trades: trade size per coin/strategy and the most
         common mistakes (also given to the AI brain)."""
-        self.adjust = learn(self.account.trades(500))
+        trades = self.account.trades(500) + self.learn_acc.trades(500)
+        trades.sort(key=lambda t: t["exit_time"], reverse=True)
+        self.adjust = learn(trades)
         self.brain.lessons = self.adjust["insights"]
 
     def _news_check(self):
@@ -287,7 +292,7 @@ class Engine:
 
                 res = Lab(self.cfg, datasets, brain=self.brain if ai else None,
                           progress=progress).run(
-                    probs=probs, seeds=self.pool.seeds(20),
+                    probs=probs, seeds=self.pool.seeds(20, self.learn_acc.strategy_stats()),
                     population=rc["round_population"], generations=rc["round_generations"],
                     train_ml=False, ai_ideas=ai)
                 new = self.pool.add_round(res)
@@ -313,7 +318,7 @@ class Engine:
             self._stop.wait(rc["pause_seconds"])
 
     def _review_pool(self):
-        for m in self.pool.review(self.account.strategy_stats()):
+        for m in self.pool.review(self.account.strategy_stats(), self.learn_acc.strategy_stats()):
             self.account.message("lab", m)       # promotions / retirements are worth keeping
             self.act(m, "lab")
 
@@ -394,6 +399,8 @@ class Engine:
                 f"open: {sm['open_positions']}\n"
                 f"Research: {self.pool.counts()['tested_total']:,} strategies tested, "
                 f"{len(sm['active_strategies'])} LIVE\n"
+                f"Learning trades today: {sm['learning']['today']} (target {sm['learning']['target']}), "
+                f"learning account {sm['learning']['pnl']:+,.2f} USDT over {sm['learning']['trades']} trades\n"
                 f"Real-money readiness: {rd['passed']}/{rd['total']} checks")
         self.act(text.replace("\n", " · "), "system")
         self.notifier.send(text, "daily")
@@ -486,22 +493,25 @@ class Engine:
             self.act(line)
 
     # ----------------------------------------------------- stops & exits
-    def _update_stops(self, p: dict, high: float) -> dict:
+    def _update_stops(self, p: dict, high: float, acc: PaperAccount | None = None) -> dict:
         """Break-even and trailing stop: the stop-loss can only move UP."""
+        acc = acc or self.account
+        main = acc is self.account
         if p.get("be_trigger") and not p.get("be_done") and high >= p["be_trigger"]:
-            new = self.account.move_stop_to_break_even(p["id"])
+            new = acc.move_stop_to_break_even(p["id"])
             if new:
                 p = {**p, "stop": new, "be_done": 1}
-                self.act(f"{p['symbol']} {p['strategy_id']}: price is up enough - stop-loss moved "
-                         f"to break-even ({_fmt_price(new)}). This trade can no longer turn into a "
-                         "real loss (except a sudden gap).", "trade")
+                if main:
+                    self.act(f"{p['symbol']} {p['strategy_id']}: price is up enough - stop-loss moved "
+                             f"to break-even ({_fmt_price(new)}). This trade can no longer turn into "
+                             "a real loss (except a sudden gap).", "trade")
         if p.get("trail_dist"):
             top = max(high, p.get("high_seen") or high)
             candidate = top - p["trail_dist"]
             if candidate > p["stop"]:
                 first_time = p["stop"] <= (p.get("stop0") or p["stop"]) + 1e-12
-                if self.account.raise_stop(p["id"], candidate):
-                    if first_time:
+                if acc.raise_stop(p["id"], candidate):
+                    if first_time and main:
                         self.act(f"{p['symbol']} {p['strategy_id']}: trailing stop is following the "
                                  f"price up - stop now {_fmt_price(candidate)}.", "trade")
                     p = {**p, "stop": candidate}
@@ -519,22 +529,25 @@ class Engine:
         return "trailing stop"
 
     def fast_check(self):
-        """Stops / targets with the latest live prices."""
-        for p in self.account.positions():
-            price = self.prices.get(p["symbol"])
-            if price is None or p["symbol"] in self.coin_errors:
-                continue                      # no fresh price this round - check next round
-            self.account.update_extremes(p["symbol"], price)
-            p = self._update_stops(p, price)
-            if price <= p["stop"]:
-                self._close(p, min(price, p["stop"]), self._stop_reason(p))
-            elif price >= p["take"]:
-                self._close(p, price, "take-profit")
+        """Stops / targets with the latest live prices (main AND learning trades)."""
+        for acc in (self.account, self.learn_acc):
+            for p in acc.positions():
+                price = self.prices.get(p["symbol"])
+                if price is None or p["symbol"] in self.coin_errors:
+                    continue                  # no fresh price this round - check next round
+                acc.update_extremes(p["symbol"], price)
+                p = self._update_stops(p, price, acc)
+                if price <= p["stop"]:
+                    self._close(p, min(price, p["stop"]), self._stop_reason(p), acc)
+                elif price >= p["take"]:
+                    self._close(p, price, "take-profit", acc)
 
     # ------------------------------------------------------- hourly cycle
     def hourly_cycle(self):
         strategies = self._live_strategies()
         self._new_this_candle = 0
+        self._learn_new = 0
+        self._learn_cands = self._learning_candidates(strategies)
         for sym in self.cfg["symbols"]:
             df = self.candles.get(sym)
             if df is None or sym in self.coin_errors:
@@ -552,6 +565,7 @@ class Engine:
                 if self.account.get("decided:" + sym) != candle_t:
                     self.account.put("decided:" + sym, candle_t)   # survives crashes/restarts
                     self._entries(sym, feats, probs, price, strategies)
+                    self._learning_entries(sym, feats, probs, price)
             except Exception as e:
                 log.error("Hourly check failed for %s: %s\n%s", sym, e, traceback.format_exc())
                 self.act(f"{sym}: hourly check failed ({e}) - the other coins continue.", "error")
@@ -571,8 +585,12 @@ class Engine:
                  f"{len(strategies)} LIVE strategies. Balance ${eq:,.2f}.", "decision")
 
     def _exits(self, sym, feats, price):
+        for acc in (self.account, self.learn_acc):
+            self._exits_for(acc, sym, feats, price)
+
+    def _exits_for(self, acc, sym, feats, price):
         now = time.time()
-        for p in [p for p in self.account.positions() if p["symbol"] == sym]:
+        for p in [p for p in acc.positions() if p["symbol"] == sym]:
             # stop / target touched while we were not watching (e.g. PC was off)?
             after = feats[feats["time"] / 1000 >= p["entry_time"] - 60]
             hit = None
@@ -583,17 +601,17 @@ class Engine:
                 if row.high >= p["take"]:
                     hit = (max(p["take"], row.open), "take-profit")
                     break
-                self.account.update_extremes(sym, row.close, row.low, row.high)
+                acc.update_extremes(sym, row.close, row.low, row.high)
                 p = self._update_stops({**p, "high_seen": max(p.get("high_seen") or 0, row.high)},
-                                       row.high)       # takes effect from the next candle
+                                       row.high, acc)  # takes effect from the next candle
             if hit:
-                self._close(p, hit[0], hit[1])
+                self._close(p, hit[0], hit[1], acc)
                 continue
             s = Strategy.from_dict(json.loads(p["strategy_json"]))
             if s.exit and s.exit_signal(feats.tail(1)).any():
-                self._close(p, price, "exit rule")
+                self._close(p, price, "exit rule", acc)
             elif now >= p["max_hold_until"]:
-                self._close(p, price, "time limit")
+                self._close(p, price, "time limit", acc)
 
     def _entries(self, sym, feats, probs, price, strategies):
         last = feats.tail(1)
@@ -672,25 +690,96 @@ class Engine:
             self.notifier.send(f"TradBot paper trade\nBUY {sym} ${size:,.0f} at {_fmt_price(price)}\n"
                                f"Stop {_fmt_price(stop)} · target {_fmt_price(take)}\n{note}", "trades")
 
-    def _close(self, p, price, reason):
-        t = self.account.close_position(p["id"], price, reason)
+    def _close(self, p, price, reason, acc: PaperAccount | None = None):
+        acc = acc or self.account
+        main = acc is self.account
+        t = acc.close_position(p["id"], price, reason)
         if not t:
             return
-        msg = (f"SELL {t['symbol']} at {_fmt_price(t['exit_price'])} ({reason}) "
+        msg = (("" if main else "[learning] ")
+               + f"SELL {t['symbol']} at {_fmt_price(t['exit_price'])} ({reason}) "
                f"{'PROFIT' if t['pnl'] > 0 else 'LOSS'} ${abs(t['pnl']):,.2f}")
         log.info(msg)
-        self.account.message("trade", msg)
-        self.act(msg, "trade")
-        self.account.record_equity(self.account.equity(self.prices))
         lesson, tags = lesson_for(t)
         entry = t["entry_price"]
         mae = (min(t.get("low_seen") or entry, t["exit_price"]) / entry - 1) * 100
         mfe = (max(t.get("high_seen") or entry, t["exit_price"]) / entry - 1) * 100
-        self.account.set_lesson(t["trade_id"], lesson, tags, mae, mfe)
-        self.account.message("lesson", f"{t['symbol']} {t['strategy_id']}: {lesson}")
-        self.act(f"Lesson - {t['symbol']} {t['strategy_id']}: {lesson}", "lesson")
-        self.notifier.send(f"TradBot paper trade\n{msg}\nLesson: {lesson}", "trades")
+        acc.set_lesson(t["trade_id"], lesson, tags, mae, mfe)
+        if main:
+            self.account.message("trade", msg)
+            self.act(msg, "trade")
+            self.account.record_equity(self.account.equity(self.prices))
+            self.account.message("lesson", f"{t['symbol']} {t['strategy_id']}: {lesson}")
+            self.act(f"Lesson - {t['symbol']} {t['strategy_id']}: {lesson}", "lesson")
+            self.notifier.send(f"TradBot paper trade\n{msg}\nLesson: {lesson}", "trades")
+        else:
+            self.act(f"{msg}. Lesson: {lesson}", "learn")
         self._relearn()
+
+    # --------------------------------------------------- learning trades
+    def _learning_opened_today(self) -> int:
+        midnight = time.mktime(time.localtime()[:3] + (0, 0, 0, 0, 0, -1))
+        opened = sum(1 for p in self.learn_acc.positions() if p["entry_time"] >= midnight)
+        return opened + sum(1 for t in self.learn_acc.trades(500) if t["entry_time"] >= midnight)
+
+    def _learning_candidates(self, live: list[Strategy]) -> list[Strategy]:
+        """Strategies still being tested, least-tested first (so every strategy gets real
+        trades), then the best history results. LIVE ones trade in the main account."""
+        live_ids = {s.id for s in live}
+        stats = self.learn_acc.strategy_stats()
+        pool = [e for e in self.pool.entries() if e["strategy"]["id"] not in live_ids]
+        pool.sort(key=lambda e: ((stats.get(e["strategy"]["id"]) or {}).get("trades", 0),
+                                 -((e.get("validation") or {}).get("sharpe", 0))))
+        return [Strategy.from_dict(e["strategy"]) for e in pool]
+
+    def _learning_entries(self, sym, feats, probs, price):
+        """Small paper trades in the separate LEARNING account, from strategies that are still
+        being tested - at least `daily_target` per day, so the bot learns from real trades."""
+        lc = self.cfg["learning"]
+        if not lc.get("enabled") or not self._learn_cands:
+            return
+        if self._learning_opened_today() >= lc["daily_max"]:
+            return
+        if self.news.blocks(sym):
+            return
+        positions = self.learn_acc.positions()
+        held = {(p["strategy_id"], p["symbol"]) for p in positions}
+        last = feats.tail(1)
+        last_prob = probs[-1:] if probs is not None else None
+        for s in self._learn_cands:
+            if (self._learn_new >= lc["max_new_per_candle"]
+                    or len(positions) + self._learn_new >= lc["max_open"]):
+                return
+            if (s.id, sym) in held or not s.entry_signal(last, last_prob).any():
+                continue
+            size = min(lc["trade_usdt"], self.learn_acc.account()["cash"])
+            if size < 10:
+                return
+            atr = float(last["atr_pct"].iat[0])
+            stop, take = price * (1 - s.stop_atr * atr), price * (1 + s.take_atr * atr)
+            note = ("Learning trade (strategy still being tested). Bought because: "
+                    + "; ".join(c.describe() for c in s.entry))
+            self.learn_acc.open_position(
+                sym, s.to_dict(), price, size, stop, take, time.time() + s.max_hold * self.tf_sec,
+                note, news_score=self.news.score(sym),
+                be_trigger=price * (1 + s.be_atr * atr) if s.be_atr else None,
+                trail_dist=s.trail_atr * atr * price if s.trail_atr else None)
+            held.add((s.id, sym))
+            self._learn_new += 1
+            self.act(f"[learning] BUY {sym} ${size:,.0f} at {_fmt_price(price)} ({s.id}) - "
+                     "testing this strategy with a real paper trade.", "learn")
+
+    def learning_summary(self) -> dict:
+        lc = self.cfg["learning"]
+        trades = self.learn_acc.trades(5000)
+        wins = sum(t["pnl"] > 0 for t in trades)
+        acc = self.learn_acc.account()
+        return {"enabled": bool(lc.get("enabled")), "today": self._learning_opened_today(),
+                "target": lc["daily_target"], "open": len(self.learn_acc.positions()),
+                "trades": len(trades), "pnl": sum(t["pnl"] for t in trades),
+                "win_rate": 100 * wins / len(trades) if trades else 0,
+                "equity": self.learn_acc.equity(self.prices), "start": acc["start_balance"],
+                "candidates": len(self._learn_cands)}
 
     # -------------------------------------------------------------- views
     def summary(self) -> dict:
@@ -709,6 +798,7 @@ class Engine:
             "trades_today": len(today), "total_trades": len(trades),
             "prices": self.prices, "kill_switch": bool(acc["kill_switch"]),
             "active_strategies": [a["strategy"]["id"] for a in load_active().get("active", [])],
+            "learning": self.learning_summary(),
         }
 
     def readiness(self) -> dict:

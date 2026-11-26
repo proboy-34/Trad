@@ -61,10 +61,19 @@
           <div class="table-wrap"><table class="radar"><thead><tr><th>Coin</th><th>Price</th><th>Strategy</th><th>Buy rules met</th><th>Waiting for</th><th>Status</th></tr></thead><tbody id="radar-body"></tbody></table></div>
           <div id="radar-empty" class="empty hidden">No LIVE strategies yet — research is finding the first ones.</div>
         </div>
+        <div class="side-col">
+        <div class="card learn-card">
+          <div class="card-head"><h2>Learning trades today</h2><span class="muted small">separate fake account</span></div>
+          <div class="learn-goal"><b id="lg-count">0</b><span>/ <span id="lg-target">10</span> target</span></div>
+          <div class="bar"><i id="lg-bar"></i></div>
+          <dl class="status" id="lg-list"></dl>
+          <p class="muted small">Small trades from strategies still being tested. Winners get promoted to the main account, losers are retired.</p>
+        </div>
         <div class="card">
           <div class="card-head"><h2>Real-money readiness</h2><span class="pill off" id="ready-pill"></span></div>
           <ul class="checks" id="ready-list"></ul>
           <p class="muted small">Real-money trading is not built into TradBot. Only when every check is green for weeks is it worth talking about — and then only with a small amount.</p>
+        </div>
         </div>
       </div>
       <div class="grid2">
@@ -138,7 +147,7 @@
       <div class="pipeline big" id="pipeline2"></div>
       <div class="card">
         <div class="card-head"><h2>Strategy pool</h2><span class="muted small" id="pool-note"></span></div>
-        <div class="table-wrap"><table><thead><tr><th>ID</th><th>Stage</th><th>Rules</th><th>History test</th><th>Live market test</th><th>Paper account</th></tr></thead><tbody id="pool-body"></tbody></table></div>
+        <div class="table-wrap"><table><thead><tr><th>ID</th><th>Stage</th><th>Rules</th><th>History test</th><th>Live market test</th><th>Learning trades</th><th>Main account</th></tr></thead><tbody id="pool-body"></tbody></table></div>
         <div id="pool-empty" class="empty">Research is starting — the first strategies appear here in a few minutes.</div>
       </div>
       <div class="card">
@@ -150,8 +159,10 @@
 
     <!-- JOURNAL -->
     <section id="tab-journal" class="tab">
-      <header class="head"><h1>Trade journal</h1><span class="muted" id="trade-stats"></span></header>
-      <div class="card"><div class="table-wrap"><table class="journal"><thead><tr><th>Closed</th><th>Coin</th><th>Why it bought</th><th>Why it sold · lesson</th><th>P/L</th></tr></thead><tbody id="trades-body"></tbody></table></div>
+      <header class="head"><h1>Trade journal</h1><div class="actions" id="book-filter">
+        <button class="btn active" data-book="all">All</button><button class="btn" data-book="main">Main</button><button class="btn" data-book="learning">Learning</button></div></header>
+      <p class="muted" id="trade-stats"></p>
+      <div class="card"><div class="table-wrap"><table class="journal"><thead><tr><th>Closed</th><th>Coin</th><th>Account</th><th>Why it bought</th><th>Why it sold · lesson</th><th>P/L</th></tr></thead><tbody id="trades-body"></tbody></table></div>
         <div id="trades-empty" class="empty">No finished trades yet. Every trade will appear here with the reason it was bought and sold, and the lesson learned.</div></div>
     </section>
 

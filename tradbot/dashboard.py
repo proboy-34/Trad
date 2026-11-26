@@ -91,7 +91,10 @@ class API:
         return {"points": self.e.account.equity_history(), "start": acc["start_balance"]}
 
     def trades(self, q):
-        return {"trades": self.e.account.trades(300)}
+        main = [dict(t, book="main") for t in self.e.account.trades(300)]
+        learning = [dict(t, book="learning") for t in self.e.learn_acc.trades(300)]
+        both = sorted(main + learning, key=lambda t: t["exit_time"], reverse=True)[:400]
+        return {"trades": both}
 
     def messages(self, q):
         return {"messages": self.e.account.messages(120)}
@@ -107,11 +110,13 @@ class API:
 
     def strategies(self, q):
         stats = self.e.account.strategy_stats()
+        lstats = self.e.learn_acc.strategy_stats()
         order = {"live": 0, "new": 1}
         pool = sorted(self.e.pool.entries(), key=lambda x: (
             order.get(x.get("stage"), 2), -((x.get("forward") or {}).get("return_pct") or 0)))
         for a in pool:
             a["live"] = stats.get(a["strategy"]["id"])
+            a["learning"] = lstats.get(a["strategy"]["id"])
         d = load_active()
         return {"pool": pool[:60], "retired": d.get("retired", [])[-30:][::-1],
                 "counts": self.e.pool.counts(), "research": self.e.research,
@@ -165,6 +170,7 @@ class API:
             if e.account.positions() and not body.get("force"):
                 return {"ok": False, "msg": "Close open trades first (or confirm again)."}
             e.account.reset()
+            e.learn_acc.reset()
             return {"ok": True}
         if action == "settings":
             provider = str(body.get("provider", "")).lower()

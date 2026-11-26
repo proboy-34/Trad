@@ -87,12 +87,18 @@ class StrategyPool:
         with self.lock:
             return [e for e in self.data["pool"] if stage is None or e.get("stage") == stage]
 
-    def seeds(self, n: int = 20) -> list[dict]:
-        """Best strategies to evolve NEW ideas from: proven live ones first."""
+    def seeds(self, n: int = 20, learn_stats: dict | None = None) -> list[dict]:
+        """Best strategies to evolve NEW ideas from: winners of real (learning) trades and
+        proven LIVE ones first, then the best history results."""
+        learn_stats = learn_stats or {}
+
+        def key(e):
+            ls = learn_stats.get(e["strategy"]["id"]) or {}
+            won = ls.get("trades", 0) >= 3 and ls.get("profit_factor", 0) >= 1.2
+            return (won, e.get("stage") == "live", ls.get("profit_factor", 0) if won else 0,
+                    _score_validation(e))
         with self.lock:
-            pool = sorted(self.data["pool"], key=lambda e: (e.get("stage") == "live",
-                                                            _score_validation(e)), reverse=True)
-            return pool[:n]
+            return sorted(self.data["pool"], key=key, reverse=True)[:n]
 
     # -------------------------------------------------------------- add
     def add_round(self, result: dict) -> int:
@@ -164,10 +170,13 @@ class StrategyPool:
             }
 
     # ------------------------------------------- promote / retire
-    def review(self, live_stats: dict | None = None) -> list[str]:
-        """Moves strategies between stages. Returns readable messages."""
+    def review(self, live_stats: dict | None = None, learn_stats: dict | None = None) -> list[str]:
+        """Moves strategies between stages. Returns readable messages.
+        Evidence: the live market test (shadow trades), the main paper account and the
+        learning account (real small paper trades)."""
         pc, msgs = self.pc, []
         live_stats = live_stats or {}
+        learn_stats = learn_stats or {}
         with self.lock:
             keep = []
             for e in self.data["pool"]:
@@ -178,9 +187,13 @@ class StrategyPool:
                                     or f.get("return_pct", 0) < pc["retire_if_return_below_pct"]))
                 bad_account = (acc and acc["trades"] >= pc["retire_after_trades"]
                                and acc["profit_factor"] < pc["retire_if_profit_factor_below"])
-                if bad_forward or bad_account:
+                ls = learn_stats.get(e["strategy"]["id"])
+                bad_learning = (ls and ls["trades"] >= pc["retire_after_trades"]
+                                and ls["profit_factor"] < pc["retire_if_profit_factor_below"])
+                if bad_forward or bad_account or bad_learning:
                     why = ("lost in the live market test" if bad_forward
-                           else "lost in the paper account")
+                           else "lost in the paper account" if bad_account
+                           else "lost in learning trades")
                     msgs.append(f"Retired {e['strategy']['id']}: {why} "
                                 f"({f.get('trades', 0)} test trades, {f.get('return_pct', 0):+.2f}%).")
                     self.data["retired"].append(dict(e, stage="retired", retired=time.time(),
@@ -189,11 +202,20 @@ class StrategyPool:
                 keep.append(e)
             self.data["pool"] = keep
 
-            proven = [e for e in keep
-                      if (e.get("forward") or {}).get("trades", 0) >= pc["promote_after_trades"]
-                      and e["forward"]["return_pct"] > 0
-                      and e["forward"]["profit_factor"] >= pc["promote_min_profit_factor"]]
-            proven.sort(key=lambda e: e["forward"]["return_pct"], reverse=True)
+            def learn_ok(e):
+                ls = learn_stats.get(e["strategy"]["id"])
+                return bool(ls and ls["trades"] >= pc["promote_after_trades"] and ls["pnl"] > 0
+                            and ls["profit_factor"] >= pc["promote_min_profit_factor"])
+
+            def forward_ok(e):
+                f = e.get("forward") or {}
+                return (f.get("trades", 0) >= pc["promote_after_trades"] and f["return_pct"] > 0
+                        and f["profit_factor"] >= pc["promote_min_profit_factor"])
+
+            proven = [e for e in keep if forward_ok(e) or learn_ok(e)]
+            proven.sort(key=lambda e: (learn_ok(e) and forward_ok(e),
+                                       (learn_stats.get(e["strategy"]["id"]) or {}).get("profit_factor", 0),
+                                       (e.get("forward") or {}).get("return_pct", 0)), reverse=True)
             live = proven[: pc["max_live"]]
             if len(live) < pc["min_live"]:      # not enough proven yet -> best new on probation
                 # strategies already on probation keep their place (no pointless swapping);
@@ -224,10 +246,15 @@ class StrategyPool:
                     e["stage"] = "live"
                     e["probation"] = e["strategy"]["id"] not in {x["strategy"]["id"] for x in proven}
                     if old != "live":
-                        msgs.append(f"Promoted {e['strategy']['id']} to LIVE"
-                                    + (" (probation - best new strategy)" if e["probation"] else
-                                       f" - made {e['forward']['return_pct']:+.2f}% in the live market test")
-                                    + ".")
+                        ls = learn_stats.get(e["strategy"]["id"])
+                        if e["probation"]:
+                            why = " (probation - best new strategy)"
+                        elif learn_ok(e):
+                            why = (f" - won in learning trades ({ls['trades']} trades, profit factor "
+                                   f"{ls['profit_factor']:.2f})")
+                        else:
+                            why = f" - made {e['forward']['return_pct']:+.2f}% in the live market test"
+                        msgs.append(f"Promoted {e['strategy']['id']} to LIVE{why}.")
                 else:
                     if old == "live":
                         msgs.append(f"{e['strategy']['id']} moved back to testing "

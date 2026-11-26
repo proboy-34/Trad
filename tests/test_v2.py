@@ -106,7 +106,7 @@ def test_broken_config_uses_safe_defaults(tmp_path):
     p = tmp_path / "c.yaml"
     p.write_text("risk: [this is: not valid\n")
     cfg = load_config(p)
-    assert cfg["risk"]["max_position_pct"] == 25 and cfg["_warnings"]
+    assert cfg["risk"]["max_position_pct"] == 20 and cfg["_warnings"]
 
 
 def test_impossible_values_are_corrected():

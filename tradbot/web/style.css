@@ -222,6 +222,14 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 14px 0; }
 .bar i.indeterminate { width: 40%; animation: indet 1.2s ease-in-out infinite; }
 @keyframes indet { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
 #notice { font-size: 13px; }
+.learn-goal { display: flex; align-items: baseline; gap: 8px; }
+.learn-goal b { font-size: 30px; font-variant-numeric: tabular-nums; }
+.learn-goal span { color: var(--muted); }
+.learn-card .bar { margin: 6px 0 12px; }
+.learn-card .bar i { background: #c084fc; }
+.st.learning { background: rgba(192,132,252,.15); color: #d8b4fe; }
+.tag.learn { color: #d8b4fe; }
+.timeline li.k-learn::before { border-color: #c084fc; }
 
 @media (max-width: 1100px) {
   .kpis { grid-template-columns: repeat(2, 1fr); }

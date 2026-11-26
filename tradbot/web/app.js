@@ -5,8 +5,8 @@
 
 const $ = (id) => document.getElementById(id);
 const LWC = window.LightweightCharts;
-const APP_VERSION = "2.0";   // must match tradbot/__init__.py
-const state = { tab: "overview", symbol: null, charts: {}, last: null, symbols: [], restarting: false };
+const APP_VERSION = "2.1";   // must match tradbot/__init__.py
+const state = { book: "all", trades: [], tab: "overview", symbol: null, charts: {}, last: null, symbols: [], restarting: false };
 
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const money = (v, d = 2) => (v == null || isNaN(v) ? "–" : "$" + Number(v).toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d }));
@@ -127,6 +127,19 @@ async function loadState() {
       <td>${price(p.entry_price)}<div class="muted small">${dt(p.entry_time)}</div></td><td>${price(p.price)}</td>
       <td><span class="down">${price(p.stop)}</span> / <span class="up">${price(p.take)}</span>${p.stop0 && p.stop > p.stop0 * 1.000001 ? '<div class="small up">stop raised (locks profit)</div>' : ""}</td>
       <td class="${cls(p.pnl)}">${money(p.pnl)}<div class="small">${pct(p.pnl_pct)}</div></td></tr>`).join("");
+
+  // learning trades
+  const lg = sm.learning || {};
+  $("lg-count").textContent = lg.today ?? 0;
+  $("lg-target").textContent = lg.target ?? 10;
+  $("lg-bar").style.width = Math.min(100, 100 * (lg.today || 0) / Math.max(1, lg.target || 10)) + "%";
+  $("lg-list").innerHTML = [
+    ["Open learning trades", lg.open ?? 0],
+    ["Finished learning trades", lg.trades ?? 0],
+    ["Win rate", lg.trades ? Math.round(lg.win_rate) + "%" : "–"],
+    ["Learning account P/L", `<span class="${cls(lg.pnl)}">${money(lg.pnl)}</span>`],
+    ["Strategies being tested", lg.candidates ?? "–"],
+  ].map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("");
 
   // readiness
   const rd = s.readiness;
@@ -269,7 +282,7 @@ function renderLivePage(s) {
     { icon: "📡", name: "Scanning", val: `${s.symbols.length} coins`, sub: `every ${s.scan_seconds}s · ${ago(s.engine.last_scan)}`, lit: s.engine.last_scan && s.server_time - s.engine.last_scan < s.scan_seconds + 10 },
     { icon: "🎯", name: "Signals", val: count(["signal"]), sub: best ? `closest: ${best.symbol} ${best.met}/${best.total} rules` : "waiting", lit: recent(s, ["signal"], 120) },
     { icon: "🛡️", name: "Filter · Risk · News · AI", val: count(["filter", "risk", "news", "ai"]), sub: `checks before every buy · filter ${s.filter && s.filter.enabled ? "ON" : "OFF"}`, lit: recent(s, ["filter", "risk", "news", "ai"], 120), warn: true },
-    { icon: "💱", name: "Trades", val: `${s.positions.length} open`, sub: `${sm.total_trades} finished`, lit: recent(s, ["trade"], 300) || s.positions.length > 0 },
+    { icon: "💱", name: "Trades", val: `${s.positions.length + ((sm.learning || {}).open || 0)} open`, sub: `${sm.total_trades} main · ${(sm.learning || {}).today || 0} learning today`, lit: recent(s, ["trade", "learn"], 300) || s.positions.length > 0 },
     { icon: "🧠", name: "Lessons", val: sm.total_trades, sub: "learned from every trade", lit: recent(s, ["lesson"], 300) },
   ];
   $("map").innerHTML = st.map((x) => `<div class="station ${x.lit ? (x.warn ? "warn" : "lit") + " flow" : ""}">
@@ -327,6 +340,7 @@ async function loadStrategies() {
       <td class="rules-cell">${esc(e.description.buy || "")}<div class="sell">${esc(e.description.sell || "")}</div></td>
       <td>${fmtTest(e.validation)}<div class="muted small">final test ${pct(e.final?.return_pct)}</div></td>
       <td>${fw}</td>
+      <td>${e.learning ? `<span class="${cls(e.learning.pnl)}">${money(e.learning.pnl)}</span> <span class="muted small">${e.learning.trades} trades · PF ${e.learning.profit_factor.toFixed(2)}</span>` : '<span class="muted small">–</span>'}</td>
       <td>${live ? `<span class="${cls(live.pnl)}">${money(live.pnl)}</span> <span class="muted small">${live.trades} trades</span>` : '<span class="muted small">–</span>'}</td></tr>`;
   }).join("");
   const ret = d.retired || [];
@@ -337,16 +351,27 @@ async function loadStrategies() {
 /* --------------------------------------------------------- journal */
 async function loadJournal() {
   const d = await get("trades");
-  const t = d.trades;
+  state.trades = d.trades;
+  renderJournal();
+}
+function renderJournal() {
+  const t = state.trades.filter((x) => state.book === "all" || x.book === state.book);
   $("trades-empty").classList.toggle("hidden", t.length > 0);
   const wins = t.filter((x) => x.pnl > 0).length, total = t.reduce((a, x) => a + x.pnl, 0);
   $("trade-stats").textContent = t.length ? `${t.length} trades · ${Math.round((100 * wins) / t.length)}% wins · total ${money(total)}` : "";
   $("trades-body").innerHTML = t.map((x) => `<tr><td>${dt(x.exit_time)}<div class="muted small">held ${Math.max(1, Math.round((x.exit_time - x.entry_time) / 3600))} h</div></td>
     <td><b>${esc(x.symbol)}</b><div class="muted small">${esc(x.strategy_id)}</div></td>
+    <td><span class="st ${x.book === "learning" ? "learning" : "live"}">${x.book === "learning" ? "learning" : "main"}</span></td>
     <td class="why">${esc(x.note || "")}<div class="muted small">bought at ${price(x.entry_price)}</div></td>
     <td class="why"><b>${esc(x.reason)}</b> at ${price(x.exit_price)}${x.lesson ? `<span class="lesson">${esc(x.lesson)}</span>` : ""}</td>
     <td class="${cls(x.pnl)}">${money(x.pnl)}<div class="small">${pct(x.return_pct)}</div></td></tr>`).join("");
 }
+
+document.querySelectorAll("#book-filter button").forEach((b) => b.addEventListener("click", () => {
+  state.book = b.dataset.book;
+  document.querySelectorAll("#book-filter button").forEach((x) => x.classList.toggle("active", x === b));
+  renderJournal();
+}));
 
 /* -------------------------------------------------------- backtest */
 const COLORS = ["#3b82f6", "#22c55e", "#f59e0b", "#c084fc", "#14b8a6", "#f472b6", "#a3e635", "#fb923c"];

@@ -160,7 +160,7 @@ def test_risk_rules(tmp_path):
     risk = RiskManager(c, acc)
     risk.update(10000)
     ok, why, size = risk.can_open(10000, "BTC/USDT", "S1")
-    assert ok and size == pytest.approx(2500)            # 25% max per trade
+    assert ok and size == pytest.approx(2000)            # 20% max per trade
     acc.open_position("BTC/USDT", {"id": "S1"}, 100, size, 90, 110, 1e12)
     ok, why, _ = risk.can_open(10000, "BTC/USDT", "S1")
     assert not ok and "already" in why                   # no doubling up

@@ -43,9 +43,9 @@ paper:
 #  including ideas from the AI brain.
 # ---------------------------------------------------------------------
 risk:
-  max_position_pct: 25      # max % of balance in one trade
-  max_open_positions: 3     # max trades open at the same time
-  max_new_per_candle: 2     # max NEW trades per hour (coins move together = same bet)
+  max_position_pct: 20      # max % of balance in one trade
+  max_open_positions: 5     # max trades open at the same time
+  max_new_per_candle: 3     # max NEW trades per hour (coins move together = same bet)
   daily_loss_limit_pct: 5   # stop trading for the day after -5%
   kill_switch_drawdown_pct: 20   # stop ALL trading after -20% from peak
   min_trade_usdt: 10        # don't open trades smaller than this
@@ -120,6 +120,20 @@ brain:
   daily_report: true
   use_news: true            # Gemini: search the web for crypto news
   max_calls_per_hour: 20    # stay well inside free-tier limits
+
+# ---------------------------------------------------------------------
+#  LEARNING TRADES - a SEPARATE fake account. Every hour the bot also trades
+#  the strategies that are still being tested (small size), so it gets at
+#  least `daily_target` real trades per day to learn from. Strategies that
+#  win there are promoted to the main account; losers are retired.
+# ---------------------------------------------------------------------
+learning:
+  enabled: true
+  daily_target: 10          # at least this many learning trades per day
+  daily_max: 40             # never more than this per day
+  trade_usdt: 200           # size of each learning trade (fake USDT)
+  max_open: 20              # learning trades open at the same time
+  max_new_per_candle: 6     # new learning trades per hour
 
 # ---------------------------------------------------------------------
 #  PHONE ALERTS (Telegram) - connect in the dashboard: Settings -> Phone alerts

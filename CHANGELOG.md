@@ -2,6 +2,14 @@
 
 The newest version is at the top. The dashboard shows the newest section once after an update.
 
+## 2.1 - learning trades (10+ trades a day)
+- New separate LEARNING account: every hour the bot also places small trades ($200, fake money) from the strategies that are still being tested - target at least 10 per day
+- Every learning trade gets a stop-loss, trailing stop, exit and a lesson, just like main trades
+- Strategies that win in learning trades are promoted to the main account; losers are retired (checked every hour)
+- New research is evolved from the learning winners first
+- Overview shows "Learning trades today: X / 10"; the Journal shows main and learning trades with a filter; the Strategies table shows each strategy's learning results
+- Main account has more room: up to 5 open trades (20% each), 3 new per hour
+
 ## 2.0 - bigger, safer, easier
 - Trailing stop: strategies can now follow the price up and lock in profit (tested honestly in the backtester too)
 - Real-money readiness checklist on the Overview (7 checks - all must be green for weeks)
