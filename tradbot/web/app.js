@@ -5,7 +5,7 @@
 
 const $ = (id) => document.getElementById(id);
 const LWC = window.LightweightCharts;
-const APP_VERSION = "2.1";   // must match tradbot/__init__.py
+const APP_VERSION = "2.2";   // must match tradbot/__init__.py
 const state = { book: "all", trades: [], tab: "overview", symbol: null, charts: {}, last: null, symbols: [], restarting: false };
 
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -134,10 +134,10 @@ async function loadState() {
   $("lg-target").textContent = lg.target ?? 10;
   $("lg-bar").style.width = Math.min(100, 100 * (lg.today || 0) / Math.max(1, lg.target || 10)) + "%";
   $("lg-list").innerHTML = [
-    ["Open learning trades", lg.open ?? 0],
-    ["Finished learning trades", lg.trades ?? 0],
+    ["Open testing trades", lg.open ?? 0],
+    ["Finished testing trades", lg.trades ?? 0],
     ["Win rate", lg.trades ? Math.round(lg.win_rate) + "%" : "–"],
-    ["Learning account P/L", `<span class="${cls(lg.pnl)}">${money(lg.pnl)}</span>`],
+    ["Testing trades P/L", `<span class="${cls(lg.pnl)}">${money(lg.pnl)}</span>`],
     ["Strategies being tested", lg.candidates ?? "–"],
   ].map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("");
 
@@ -282,7 +282,7 @@ function renderLivePage(s) {
     { icon: "📡", name: "Scanning", val: `${s.symbols.length} coins`, sub: `every ${s.scan_seconds}s · ${ago(s.engine.last_scan)}`, lit: s.engine.last_scan && s.server_time - s.engine.last_scan < s.scan_seconds + 10 },
     { icon: "🎯", name: "Signals", val: count(["signal"]), sub: best ? `closest: ${best.symbol} ${best.met}/${best.total} rules` : "waiting", lit: recent(s, ["signal"], 120) },
     { icon: "🛡️", name: "Filter · Risk · News · AI", val: count(["filter", "risk", "news", "ai"]), sub: `checks before every buy · filter ${s.filter && s.filter.enabled ? "ON" : "OFF"}`, lit: recent(s, ["filter", "risk", "news", "ai"], 120), warn: true },
-    { icon: "💱", name: "Trades", val: `${s.positions.length + ((sm.learning || {}).open || 0)} open`, sub: `${sm.total_trades} main · ${(sm.learning || {}).today || 0} learning today`, lit: recent(s, ["trade", "learn"], 300) || s.positions.length > 0 },
+    { icon: "💱", name: "Trades", val: `${s.positions.length + ((sm.learning || {}).open || 0)} open`, sub: `${sm.total_trades} main · ${(sm.learning || {}).today || 0} testing today`, lit: recent(s, ["trade", "learn"], 300) || s.positions.length > 0 },
     { icon: "🧠", name: "Lessons", val: sm.total_trades, sub: "learned from every trade", lit: recent(s, ["lesson"], 300) },
   ];
   $("map").innerHTML = st.map((x) => `<div class="station ${x.lit ? (x.warn ? "warn" : "lit") + " flow" : ""}">
@@ -361,7 +361,7 @@ function renderJournal() {
   $("trade-stats").textContent = t.length ? `${t.length} trades · ${Math.round((100 * wins) / t.length)}% wins · total ${money(total)}` : "";
   $("trades-body").innerHTML = t.map((x) => `<tr><td>${dt(x.exit_time)}<div class="muted small">held ${Math.max(1, Math.round((x.exit_time - x.entry_time) / 3600))} h</div></td>
     <td><b>${esc(x.symbol)}</b><div class="muted small">${esc(x.strategy_id)}</div></td>
-    <td><span class="st ${x.book === "learning" ? "learning" : "live"}">${x.book === "learning" ? "learning" : "main"}</span></td>
+    <td><span class="st ${x.book === "learning" ? "learning" : "live"}">${x.book === "learning" ? "testing" : "LIVE"}</span></td>
     <td class="why">${esc(x.note || "")}<div class="muted small">bought at ${price(x.entry_price)}</div></td>
     <td class="why"><b>${esc(x.reason)}</b> at ${price(x.exit_price)}${x.lesson ? `<span class="lesson">${esc(x.lesson)}</span>` : ""}</td>
     <td class="${cls(x.pnl)}">${money(x.pnl)}<div class="small">${pct(x.return_pct)}</div></td></tr>`).join("");

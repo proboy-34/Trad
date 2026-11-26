@@ -173,7 +173,7 @@ class StrategyPool:
     def review(self, live_stats: dict | None = None, learn_stats: dict | None = None) -> list[str]:
         """Moves strategies between stages. Returns readable messages.
         Evidence: the live market test (shadow trades), the main paper account and the
-        learning account (real small paper trades)."""
+        testing trades (real small paper trades)."""
         pc, msgs = self.pc, []
         live_stats = live_stats or {}
         learn_stats = learn_stats or {}

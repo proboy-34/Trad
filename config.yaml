@@ -122,18 +122,18 @@ brain:
   max_calls_per_hour: 20    # stay well inside free-tier limits
 
 # ---------------------------------------------------------------------
-#  LEARNING TRADES - a SEPARATE fake account. Every hour the bot also trades
-#  the strategies that are still being tested (small size), so it gets at
-#  least `daily_target` real trades per day to learn from. Strategies that
-#  win there are promoted to the main account; losers are retired.
+#  TESTING TRADES - every hour the bot also trades the strategies that are
+#  still being tested, with SMALL size, in the SAME account (one balance for
+#  everything). Goal: at least `daily_target` real trades per day to learn
+#  from. Strategies that win get promoted to LIVE (bigger size); losers are retired.
 # ---------------------------------------------------------------------
 learning:
   enabled: true
-  daily_target: 10          # at least this many learning trades per day
+  daily_target: 10          # at least this many testing trades per day
   daily_max: 40             # never more than this per day
-  trade_usdt: 200           # size of each learning trade (fake USDT)
-  max_open: 20              # learning trades open at the same time
-  max_new_per_candle: 6     # new learning trades per hour
+  trade_usdt: 200           # size of each testing trade (fake USDT)
+  max_open: 20              # testing trades open at the same time
+  max_new_per_candle: 6     # new testing trades per hour
 
 # ---------------------------------------------------------------------
 #  PHONE ALERTS (Telegram) - connect in the dashboard: Settings -> Phone alerts
@@ -144,6 +144,7 @@ notify:
   daily: true               # daily summary (+ AI coach report if the AI brain is on)
   alerts: true              # kill switch, internet back after a long outage
   daily_hour: 21            # local time of the daily summary (0-23)
+  testing_trades: false     # also send every small testing trade (can be many per day)
 
 # ---------------------------------------------------------------------
 #  BACKUPS - your balance, trades and strategies, saved every day

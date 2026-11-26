@@ -63,11 +63,11 @@
         </div>
         <div class="side-col">
         <div class="card learn-card">
-          <div class="card-head"><h2>Learning trades today</h2><span class="muted small">separate fake account</span></div>
+          <div class="card-head"><h2>Testing trades today</h2><span class="muted small">small trades, same account</span></div>
           <div class="learn-goal"><b id="lg-count">0</b><span>/ <span id="lg-target">10</span> target</span></div>
           <div class="bar"><i id="lg-bar"></i></div>
           <dl class="status" id="lg-list"></dl>
-          <p class="muted small">Small trades from strategies still being tested. Winners get promoted to the main account, losers are retired.</p>
+          <p class="muted small">Small trades ($200) from strategies still being tested. Winners are promoted to LIVE (bigger trades), losers are retired. Everything uses one balance.</p>
         </div>
         <div class="card">
           <div class="card-head"><h2>Real-money readiness</h2><span class="pill off" id="ready-pill"></span></div>
@@ -147,7 +147,7 @@
       <div class="pipeline big" id="pipeline2"></div>
       <div class="card">
         <div class="card-head"><h2>Strategy pool</h2><span class="muted small" id="pool-note"></span></div>
-        <div class="table-wrap"><table><thead><tr><th>ID</th><th>Stage</th><th>Rules</th><th>History test</th><th>Live market test</th><th>Learning trades</th><th>Main account</th></tr></thead><tbody id="pool-body"></tbody></table></div>
+        <div class="table-wrap"><table><thead><tr><th>ID</th><th>Stage</th><th>Rules</th><th>History test</th><th>Live market test</th><th>Testing trades</th><th>LIVE trades</th></tr></thead><tbody id="pool-body"></tbody></table></div>
         <div id="pool-empty" class="empty">Research is starting — the first strategies appear here in a few minutes.</div>
       </div>
       <div class="card">
@@ -160,9 +160,9 @@
     <!-- JOURNAL -->
     <section id="tab-journal" class="tab">
       <header class="head"><h1>Trade journal</h1><div class="actions" id="book-filter">
-        <button class="btn active" data-book="all">All</button><button class="btn" data-book="main">Main</button><button class="btn" data-book="learning">Learning</button></div></header>
+        <button class="btn active" data-book="all">All</button><button class="btn" data-book="main">LIVE strategies</button><button class="btn" data-book="learning">Testing</button></div></header>
       <p class="muted" id="trade-stats"></p>
-      <div class="card"><div class="table-wrap"><table class="journal"><thead><tr><th>Closed</th><th>Coin</th><th>Account</th><th>Why it bought</th><th>Why it sold · lesson</th><th>P/L</th></tr></thead><tbody id="trades-body"></tbody></table></div>
+      <div class="card"><div class="table-wrap"><table class="journal"><thead><tr><th>Closed</th><th>Coin</th><th>Type</th><th>Why it bought</th><th>Why it sold · lesson</th><th>P/L</th></tr></thead><tbody id="trades-body"></tbody></table></div>
         <div id="trades-empty" class="empty">No finished trades yet. Every trade will appear here with the reason it was bought and sold, and the lesson learned.</div></div>
     </section>
 

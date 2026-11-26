@@ -78,16 +78,16 @@ DEFAULTS: dict = {
         "use_news": True,
         "max_calls_per_hour": 20,
     },
-    "learning": {                 # separate fake account for many small LEARNING trades
+    "learning": {                 # many small TESTING trades (same account as everything else)
         "enabled": True,
-        "daily_target": 10,       # at least this many learning trades per day
+        "daily_target": 10,       # at least this many testing trades per day
         "daily_max": 40,
-        "trade_usdt": 200,        # size of each learning trade
+        "trade_usdt": 200,        # size of each testing trade
         "max_open": 20,
         "max_new_per_candle": 6,
     },
     "notify": {"trades": True, "lessons": False, "daily": True, "alerts": True,
-               "daily_hour": 21},     # local time of the daily summary
+               "daily_hour": 21, "testing_trades": False},     # local time of the daily summary
     "backup": {"keep_days": 7},
     "dashboard": {"host": "127.0.0.1", "port": 8050},
 }

@@ -2,6 +2,13 @@
 
 The newest version is at the top. The dashboard shows the newest section once after an update.
 
+## 2.2 - one account for all trades
+- Learning trades and main trades are now in ONE paper account with one balance - simpler and easier to follow
+- Small trades from strategies still being tested are called "testing trades" ($200 each, at least 10 per day)
+- Testing trades follow the same safety rules as everything else (daily loss limit, kill switch, pause)
+- Journal filter: All / LIVE strategies / Testing; the Overview shows "Testing trades today"
+- Telegram only sends LIVE trades by default (set notify.testing_trades: true to also get testing trades)
+
 ## 2.1 - learning trades (10+ trades a day)
 - New separate LEARNING account: every hour the bot also places small trades ($200, fake money) from the strategies that are still being tested - target at least 10 per day
 - Every learning trade gets a stop-loss, trailing stop, exit and a lesson, just like main trades

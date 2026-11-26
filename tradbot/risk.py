@@ -41,8 +41,10 @@ class RiskManager:
         day_pnl = (equity / a["day_start_equity"] - 1) * 100 if a["day_start_equity"] else 0
         return {"drawdown_pct": dd, "day_pnl_pct": day_pnl, "kill_switch_fired": fired}
 
-    def can_open(self, equity: float, symbol: str, strategy_id: str) -> tuple[bool, str, float]:
-        """Returns (allowed, reason, trade size in USDT)."""
+    def can_open(self, equity: float, symbol: str, strategy_id: str, kind: str = "live",
+                 max_open: int | None = None, size: float | None = None) -> tuple[bool, str, float]:
+        """Returns (allowed, reason, trade size in USDT). The same safety rules (pause, kill
+        switch, daily loss) apply to EVERY trade; open-trade slots are counted per kind."""
         a = self.acc.account()
         if a["paused"]:
             return False, "bot is paused", 0.0
@@ -52,11 +54,12 @@ class RiskManager:
         if day_pnl <= -self.r["daily_loss_limit_pct"]:
             return False, f"daily loss limit reached ({day_pnl:.1f}%)", 0.0
         positions = self.acc.positions()
-        if len(positions) >= self.r["max_open_positions"]:
+        same_kind = [p for p in positions if (p.get("kind") or "live") == kind]
+        if len(same_kind) >= (max_open or self.r["max_open_positions"]):
             return False, "max open trades reached", 0.0
         if any(p["symbol"] == symbol and p["strategy_id"] == strategy_id for p in positions):
             return False, "this strategy already holds this coin", 0.0
-        size = min(equity * self.r["max_position_pct"] / 100, a["cash"])
+        size = min(size or equity * self.r["max_position_pct"] / 100, a["cash"])
         if size < self.r["min_trade_usdt"]:
             return False, "not enough free balance", 0.0
         return True, "ok", size

@@ -1,4 +1,4 @@
-"""Learning account: many small real paper trades from strategies still being tested."""
+"""Testing trades: many small paper trades from strategies still being tested - same account."""
 import time
 
 import pytest
@@ -38,25 +38,25 @@ def engine(tmp_path, monkeypatch):
 
 def test_learning_trades_open_with_limits(engine):
     engine.hourly_cycle()
-    pos = engine.learn_acc.positions()
+    pos = engine.account.positions()
     assert len(pos) == 3                                   # max 3 new per candle
-    assert all(p["cost"] == pytest.approx(200) for p in pos)
-    assert engine.account.positions() == []                # main account is separate
+    assert all(p["cost"] == pytest.approx(200) and p["kind"] == "test" for p in pos)
     assert engine.learning_summary()["today"] == 3
     # same candle again (e.g. restart): no double buys
     engine.hourly_cycle()
-    assert len(engine.learn_acc.positions()) == 3
+    assert len(engine.account.positions()) == 3
 
 
 def test_learning_trades_close_and_teach(engine):
     engine.hourly_cycle()
-    p = engine.learn_acc.positions()[0]
+    p = engine.account.positions()[0]
     engine.prices[p["symbol"]] = p["stop"] * 0.99          # price falls through the stop
     engine.fast_check()
-    t = [t for t in engine.learn_acc.trades() if t["strategy_id"] == p["strategy_id"]][0]
-    assert t["reason"] == "stop-loss" and t["lesson"]
-    assert engine.account.trades() == []                   # main account untouched
-    assert any(a["kind"] == "learn" and "Lesson" in a["msg"] for a in engine.activity)
+    t = [t for t in engine.account.trades() if t["strategy_id"] == p["strategy_id"]][0]
+    assert t["reason"] == "stop-loss" and t["lesson"] and t["kind"] == "test"
+    assert engine.account.strategy_stats("test")[p["strategy_id"]]["trades"] == 1
+    assert engine.account.strategy_stats("live") == {}
+    assert any(a["kind"] == "lesson" and "Lesson" in a["msg"] for a in engine.activity)
 
 
 def test_learning_results_promote_and_retire(tmp_path, monkeypatch):
@@ -71,3 +71,9 @@ def test_learning_results_promote_and_retire(tmp_path, monkeypatch):
     assert [e["strategy"]["id"] for e in pool.entries("live")] == [good.id]
     assert any("won in learning trades" in m for m in msgs)
     assert any("lost in learning trades" in m for m in msgs)
+
+
+def test_testing_trades_obey_the_same_safety_rules(engine):
+    engine.account.update_account(paused=1)               # paused = no trades of any kind
+    engine.hourly_cycle()
+    assert engine.account.positions() == []

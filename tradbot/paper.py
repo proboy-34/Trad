@@ -62,10 +62,10 @@ class PaperAccount:
     NEW_COLUMNS = {
         "positions": {"low_seen": "REAL", "high_seen": "REAL", "news_score": "REAL",
                       "be_trigger": "REAL", "be_price": "REAL", "be_done": "INTEGER",
-                      "trail_dist": "REAL", "stop0": "REAL"},
+                      "trail_dist": "REAL", "stop0": "REAL", "kind": "TEXT"},
         "equity": {"hold": "REAL"},
         "trades": {"stop": "REAL", "take": "REAL", "mae_pct": "REAL", "mfe_pct": "REAL",
-                   "lesson": "TEXT", "tags": "TEXT"},
+                   "lesson": "TEXT", "tags": "TEXT", "kind": "TEXT"},
     }
 
     def _migrate(self):
@@ -123,14 +123,20 @@ class PaperAccount:
             value += p["units"] * px * (1 - self.fee)
         return value
 
-    def strategy_stats(self) -> dict[str, dict]:
+    def strategy_stats(self, kind: str | None = None) -> dict[str, dict]:
+        """Results per strategy. kind: None = all trades, "live" or "test"."""
+        where, args = "", ()
+        if kind == "test":
+            where, args = " WHERE kind = ?", ("test",)
+        elif kind == "live":
+            where = " WHERE kind IS NULL OR kind != 'test'"
         with self.lock:
             rows = self.db.execute(
                 "SELECT strategy_id, COUNT(*) n, SUM(pnl) pnl,"
                 " SUM(CASE WHEN pnl > 0 THEN pnl ELSE 0 END) gains,"
                 " SUM(CASE WHEN pnl <= 0 THEN -pnl ELSE 0 END) losses,"
                 " SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) wins"
-                " FROM trades GROUP BY strategy_id").fetchall()
+                " FROM trades" + where + " GROUP BY strategy_id", args).fetchall()
         out = {}
         for r in rows:
             pf = (r["gains"] / r["losses"]) if r["losses"] else (99.0 if r["gains"] else 0.0)
@@ -210,7 +216,7 @@ class PaperAccount:
     def open_position(self, symbol: str, strategy: dict, price: float, usdt: float,
                       stop: float, take: float, max_hold_until: float, note: str = "",
                       news_score: float | None = None, be_trigger: float | None = None,
-                      trail_dist: float | None = None) -> dict:
+                      trail_dist: float | None = None, kind: str = "live") -> dict:
         """Fake market BUY: pays slippage + fee, exactly like the backtester."""
         with self.lock:
             acc = self.account()
@@ -220,12 +226,12 @@ class PaperAccount:
             cur = self.db.execute(
                 "INSERT INTO positions (symbol, strategy_id, strategy_json, units, entry_price,"
                 " entry_time, cost, stop, take, max_hold_until, note, low_seen, high_seen, news_score,"
-                " be_trigger, be_price, be_done, trail_dist, stop0)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                " be_trigger, be_price, be_done, trail_dist, stop0, kind)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (symbol, strategy["id"], json.dumps(strategy), units, fill, time.time(), usdt,
                  stop, take, max_hold_until, note, fill, fill, news_score,
                  be_trigger, fill * (1 + 2 * self.fee + 2 * self.slip) if be_trigger else None, 0,
-                 trail_dist, stop))
+                 trail_dist, stop, kind))
             self.db.execute("UPDATE account SET cash = cash - ? WHERE id = 1", (usdt,))
             self.db.commit()
             return dict(self.db.execute("SELECT * FROM positions WHERE id = ?",
@@ -243,11 +249,11 @@ class PaperAccount:
             pnl = proceeds - p["cost"]
             cur = self.db.execute(
                 "INSERT INTO trades (symbol, strategy_id, entry_time, exit_time, entry_price,"
-                " exit_price, units, cost, proceeds, pnl, return_pct, reason, note, stop, take)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                " exit_price, units, cost, proceeds, pnl, return_pct, reason, note, stop, take, kind)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (p["symbol"], p["strategy_id"], p["entry_time"], time.time(), p["entry_price"], fill,
                  p["units"], p["cost"], proceeds, pnl, 100 * pnl / p["cost"], reason, p["note"],
-                 p["stop"], p["take"]))
+                 p["stop"], p["take"], p.get("kind") or "live"))
             trade_id = cur.lastrowid
             self.db.execute("DELETE FROM positions WHERE id = ?", (pos_id,))
             self.db.execute("UPDATE account SET cash = cash + ? WHERE id = 1", (proceeds,))

@@ -48,14 +48,15 @@ TradBot never stops working. Three things run at the same time:
 (e.g. target = 4 × ATR, stop = 2 × ATR) and losses are cut fast. Over many trades, a small edge adds up,
 while the risk rules keep any single mistake small. No bot can promise profit, which is why it paper trades first.
 
-## Learning trades (at least 10 a day)
+## Testing trades (at least 10 a day)
 
-Besides the main paper account, TradBot has a **separate learning account** (also fake money).
-Every hour it places small learning trades ($200 each) from the strategies that are still being
-tested - aiming for **at least 10 per day** (`learning.daily_target`). Every learning trade gets a
-stop-loss, trailing stop, exit and lesson. Strategies that **win** in learning trades are promoted to
-the main account; strategies that **lose** are retired; new research starts from the winners.
-The Overview shows "Learning trades today: X / 10", and the Journal can show main, learning or all trades.
+There is **one paper account** (one balance) for everything. Every hour, besides the trades of the
+LIVE strategies, the bot places small **testing trades** ($200 each) from the strategies that are
+still being tested - aiming for **at least 10 per day** (`learning.daily_target`). Testing trades use
+the same safety rules (daily loss limit, kill switch, pause). Every trade gets a stop-loss, trailing
+stop, exit and lesson. Strategies that **win** their testing trades are promoted to LIVE (bigger
+trades); strategies that **lose** are retired; new research starts from the winners.
+The Overview shows "Testing trades today: X / 10", and the Journal can show LIVE, testing or all trades.
 How many happen depends on the market: on quiet hours there may be none, on busy hours up to 6.
 
 ## The learned trade filter
